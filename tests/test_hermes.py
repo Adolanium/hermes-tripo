@@ -20,13 +20,15 @@ FILES = ("plugin.yaml", "__init__.py", "client.py", "plans.py", "tools.py")
 def hermes(tmp_path, monkeypatch):
     """Install this checkout as a user plugin in a throwaway profile and discover it."""
     home = tmp_path / "profile"
-    plugin_dir = home / "plugins" / "tripo"
+    plugin_dir = home / "plugins" / "hermes-tripo"
     plugin_dir.mkdir(parents=True)
     for name in FILES:
         shutil.copy2(ROOT / name, plugin_dir / name)
     shutil.copytree(ROOT / "skills", plugin_dir / "skills")
     # JSON is valid YAML.
-    (home / "config.yaml").write_text(json.dumps({"plugins": {"enabled": ["tripo"]}}), encoding="utf-8")
+    (home / "config.yaml").write_text(
+        json.dumps({"plugins": {"enabled": ["hermes-tripo"]}}), encoding="utf-8"
+    )
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setenv("HERMES_BUNDLED_PLUGINS", str(tmp_path / "empty-bundled"))
     monkeypatch.setenv("TRIPO_API_KEY", "tsk_contract_test")

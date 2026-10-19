@@ -24,7 +24,7 @@
 ## Powered by Hermes
 
 Hermes Tripo is a community-built tool plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds eleven
-`tripo_*` tools and a `tripo:workflow` skill, and it talks to Tripo's v3 API (`openapi.tripo3d.ai/v3`) directly, with no
+`tripo_*` tools and a `hermes-tripo:workflow` skill, and it talks to Tripo's v3 API (`openapi.tripo3d.ai/v3`) directly, with no
 extra packages and no background process.
 
 It works in the CLI, Hermes Desktop, the messaging gateway and subagents: anywhere Hermes runs tools and someone can
