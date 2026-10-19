@@ -1,0 +1,31 @@
+name: tripo
+version: "0.1.0"
+description: "Tripo 3D for Hermes: text, image or multiview to 3D, retexturing, rigging, preset animations, retopology and format conversion on Tripo's v3 API. Hermes asks before every credit-spending call and shows the estimated cost. Unofficial; not affiliated with Tripo or VAST."
+author: Adolanium
+license: MIT
+homepage: https://github.com/Adolanium/hermes-tripo
+manifest_version: 1
+kind: standalone
+requires_hermes: ">=0.21.6"
+
+provides_tools:
+  - tripo_generate_model
+  - tripo_generate_image
+  - tripo_texture
+  - tripo_rig_check
+  - tripo_rig
+  - tripo_animate
+  - tripo_retopology
+  - tripo_convert
+  - tripo_task
+  - tripo_download
+  - tripo_balance
+
+provides_hooks:
+  - pre_tool_call
+
+requires_env:
+  - name: TRIPO_API_KEY
+    description: "Tripo API key (starts with tsk_). Create one in the Tripo developer console under API Keys."
+    url: https://platform.tripo3d.ai/api-keys
+    secret: true

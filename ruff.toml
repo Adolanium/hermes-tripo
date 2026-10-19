@@ -1,0 +1,9 @@
+line-length = 110
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501"]  # long lines are mostly prose in tool descriptions
+
+[lint.isort]
+known-first-party = ["hermes_plugins"]

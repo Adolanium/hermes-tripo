@@ -1,0 +1,69 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.13']
+    name: Unit · ${{ matrix.os }} · Python ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      # httpx is a core Hermes dependency; this job has no Hermes to inherit it from.
+      - run: python -m pip install httpx pytest ruff
+      - run: ruff check . && ruff format --check .
+      # Not bare `pytest`: see tests/pytest.ini.
+      - run: pytest tests -q
+
+  hermes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+        hermes:
+          - { label: 'floor v0.21.6', ref: 818c13be1dc4fd28987e1e881a9408224afd4535 }
+          - { label: 'v0.22.2', ref: d923a5eb487a17c0a68801bba9ef0f56c81040a8 }
+    name: Python ${{ matrix.python }} · Hermes ${{ matrix.hermes.label }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: plugin
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.hermes.ref }}
+          path: hermes
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Prepare isolated Hermes environment
+        run: |
+          python -m venv "$RUNNER_TEMP/hermes-test-venv"
+          "$RUNNER_TEMP/hermes-test-venv/bin/python" -m pip install -e "$GITHUB_WORKSPACE/hermes[dev]"
+          echo "HERMES_SOURCE=$GITHUB_WORKSPACE/hermes" >> "$GITHUB_ENV"
+          echo "HERMES_PYTHON=$RUNNER_TEMP/hermes-test-venv/bin/python" >> "$GITHUB_ENV"
+          echo "HERMES_HOME=$RUNNER_TEMP/hermes-test-profile" >> "$GITHUB_ENV"
+      - name: Contract tests
+        run: bash plugin/scripts/test.sh
+      - name: Plugin validation
+        working-directory: hermes
+        run: '"$HERMES_PYTHON" -m hermes_cli.main plugins validate "$GITHUB_WORKSPACE/plugin" --install-deps'
