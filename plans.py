@@ -38,6 +38,20 @@ IMAGE_MODELS = (
     "chat_image_2.5_sunburst",
 )
 IMAGE_TEMPLATES = ("asset_extraction", "character_completion", "t_pose", "variants", "figure")
+EDIT_MODELS = (
+    "seedream_v5",
+    "banana",
+    "banana_pro",
+    "banana2",
+    "chat_image_2",
+    "chat_image_2.5_flare",
+    "chat_image_2.5_sunburst",
+)
+EDIT_TEMPLATES = ("t_pose", "character_completion", "3d_enhance", "variants", "figure")
+# Editing models Tripo bills at its higher image tier.
+_PREMIUM_EDIT = ("chat_image", "banana_pro", "banana2")
+SEGMENT_MODELS = ("v1.0-20250506", "v2.0-20260430")
+COMPLETION_MODES = ("ai_completion", "quick_cap")
 RIG_MODELS = ("v1.0-20240301", "v2.5-20260210", "v3.0-20260909")
 RIG_TYPES = ("biped", "quadruped", "hexapod", "octopod", "avian", "serpentine", "aquatic", "others")
 RIG_SPECS = ("tripo", "mixamo", "actorcore", "unity", "unreal", "vrm")
@@ -132,7 +146,7 @@ def _put(body: dict, args: dict, *keys: str) -> None:
 def generate_model(args: dict) -> Plan:
     prompt = (args.get("prompt") or "").strip()
     image = args.get("image")
-    views = args.get("views")
+    views = args.get("views") or args.get("multiview_task")
     given = [name for name, value in (("prompt", prompt), ("image", image), ("views", views)) if value]
     if len(given) != 1:
         raise PlanError(
@@ -155,12 +169,18 @@ def generate_model(args: dict) -> Plan:
         body["input"] = reference(image, "image", "image")
     else:
         mode, endpoint = "multiview", "/generation/multiview-to-model"
-        if not isinstance(views, dict) or set(views) - set(VIEWS):
-            raise PlanError(f"views must be an object with keys from: {', '.join(VIEWS)}")
-        present = [view for view in VIEWS if views.get(view)]
-        if "front" not in present or len(present) < 2:
-            raise PlanError("views needs the front view and at least one other view")
-        body["inputs"] = [{view: reference(views[view], "image", f"views.{view}")} for view in present]
+        if isinstance(views, str) and is_task_id(views.strip()):
+            # The four views a tripo_multiview task made.
+            body["inputs"] = [{"task_id": views.strip()}]
+        else:
+            if not isinstance(views, dict) or set(views) - set(VIEWS):
+                raise PlanError(
+                    f"views must be a tripo_multiview task id or an object with keys from: {', '.join(VIEWS)}"
+                )
+            present = [view for view in VIEWS if views.get(view)]
+            if "front" not in present or len(present) < 2:
+                raise PlanError("views needs the front view and at least one other view")
+            body["inputs"] = [{view: reference(views[view], "image", f"views.{view}")} for view in present]
 
     negative = (args.get("negative_prompt") or "").strip()
     if negative:
@@ -243,22 +263,75 @@ def generate_model(args: dict) -> Plan:
 
 
 def generate_image(args: dict) -> Plan:
+    """Text to image, or image to image when reference images are given (edits, style transfer)."""
     prompt = (args.get("prompt") or "").strip()
-    if not prompt:
-        raise PlanError("prompt is required")
-    body: dict[str, Any] = {"prompt": prompt}
-    model = _choice(args, "model", IMAGE_MODELS)
-    template = _choice(args, "template", IMAGE_TEMPLATES)
-    if model:
-        body["model"] = model
-    if template:
-        body["template"] = template
+    images = args.get("images") or ([args["image"]] if args.get("image") else [])
+    if not isinstance(images, list):
+        raise PlanError("images must be a list")
+    if not images:
+        if not prompt:
+            raise PlanError("prompt is required")
+        body: dict[str, Any] = {"prompt": prompt}
+        model = _choice(args, "model", IMAGE_MODELS)
+        template = _choice(args, "template", IMAGE_TEMPLATES)
+        if model:
+            body["model"] = model
+        if template:
+            body["template"] = template
+        _put(body, args, "size", "aspect_ratio")
+        note = "GPT image models can cost more" if model and model.startswith("chat_image") else ""
+        summary = (
+            "text to image" + (f" ({template})" if template else "") + (f" with {model}" if model else "")
+        )
+        return Plan("/generation/text-to-image", body, 5, summary, cost_note=note)
+
+    if len(images) > 4:
+        raise PlanError("At most 4 reference images")
+    model = _choice(args, "model", EDIT_MODELS)
+    template = _choice(args, "template", EDIT_TEMPLATES)
+    if not prompt and not template:
+        raise PlanError("Editing needs a prompt or a template")
+    refs = [reference(image, "image", "images") for image in images]
+    body = {"input": refs[0]}
+    if len(refs) > 1:
+        body["inputs"] = refs
+    if prompt:
+        body["prompt"] = prompt
+    for key, value in (("model", model), ("template", template)):
+        if value:
+            body[key] = value
     _put(body, args, "size", "aspect_ratio")
-    note = ""
-    if model and model.startswith("chat_image"):
-        note = "GPT image models can cost more"
-    summary = "text to image" + (f" ({template})" if template else "") + (f" with {model}" if model else "")
-    return Plan("/generation/text-to-image", body, 5, summary, cost_note=note)
+    credits = 10 if model and model.startswith(_PREMIUM_EDIT) else 5
+    summary = "image edit" + (f" ({template})" if template else "") + (f" with {model}" if model else "")
+    return Plan("/generation/image-to-image", body, credits, summary)
+
+
+def multiview(args: dict) -> Plan:
+    """Four views (front, left, back, right) from one image, or edits to an earlier set of views."""
+    edits = args.get("edits")
+    if edits:
+        source = args.get("input")
+        if not is_task_id(source):
+            raise PlanError("edits need input: the task id of an earlier tripo_multiview task")
+        if (
+            not isinstance(edits, dict)
+            or set(edits) - set(VIEWS)
+            or not all(isinstance(text, str) and text.strip() for text in edits.values())
+        ):
+            raise PlanError(f"edits must map views ({', '.join(VIEWS)}) to an instruction")
+        prompts = [{"view": view, "prompt": edits[view].strip()} for view in VIEWS if view in edits]
+        count = len(prompts)
+        summary = f"edit {count} view{'s' if count > 1 else ''} ({', '.join(p['view'] for p in prompts)})"
+        return Plan("/generation/edit-multiview", {"input": source, "prompts": prompts}, 5 * count, summary)
+    image = args.get("image")
+    if not image:
+        raise PlanError("Pass image (to make four views) or input plus edits (to change them)")
+    return Plan(
+        "/generation/image-to-multiview",
+        {"input": reference(image, "image", "image")},
+        10,
+        "image to four views",
+    )
 
 
 def texture(args: dict) -> Plan:
@@ -290,9 +363,63 @@ def texture(args: dict) -> Plan:
     if guidance:
         body["texture_prompt"] = guidance
     _put(body, args, "pbr", "texture_seed")
+    parts = _part_names(args)
+    if parts:
+        body["part_names"] = parts
 
     credits = _TEXTURE_TASK[quality] + (5 if style_image else 0)
     return Plan("/models/texture", body, credits, f"retexture ({quality})")
+
+
+def _part_names(args: dict) -> list[str] | None:
+    names = args.get("part_names")
+    if names is None:
+        return None
+    if not isinstance(names, list) or not names or not all(isinstance(n, str) and n.strip() for n in names):
+        raise PlanError("part_names must be a list of part names from a tripo_parts segment task")
+    return [n.strip() for n in names]
+
+
+def parts(args: dict) -> Plan:
+    """Split a model into named parts, or rebuild the hidden geometry of parts after a split."""
+    action = _choice(args, "action", ("segment", "complete"), "segment")
+    if action == "segment":
+        body: dict[str, Any] = {"input": reference(args.get("input"), "model")}
+        model = _choice(args, "model", SEGMENT_MODELS)
+        granularity = _choice(args, "granularity", ("simple", "balanced", "detailed"))
+        if granularity:
+            model = model or "v2.0-20260430"
+            if model != "v2.0-20260430":
+                raise PlanError("granularity needs segmentation model v2.0-20260430")
+            body["segmentation_granularity"] = granularity
+        if model:
+            body["model"] = model
+        return Plan(
+            "/mesh/segment", body, 40, "split into parts" + (f" ({granularity})" if granularity else "")
+        )
+    source = args.get("input")
+    if not is_task_id(source):
+        raise PlanError("complete needs input: the task id of a finished tripo_parts segment task")
+    body = {"input": source}
+    mode = _choice(args, "completion_mode", COMPLETION_MODES)
+    if mode:
+        body["completion_mode"] = mode
+    names = _part_names(args)
+    if names:
+        body["part_names"] = names
+    what = f"{len(names)} part{'s' if len(names) > 1 else ''}" if names else "all parts"
+    return Plan(
+        "/mesh/complete", body, 50, f"complete {what}" + (" (quick cap)" if mode == "quick_cap" else "")
+    )
+
+
+def smart_uv(args: dict) -> Plan:
+    body: dict[str, Any] = {"input": reference(args.get("input"), "model")}
+    if args.get("bake") is False:
+        body["bake"] = False
+    return Plan(
+        "/mesh/uv", body, 20, "smart UV unwrap" + ("" if body.get("bake", True) else " (no texture bake)")
+    )
 
 
 def rig_check(args: dict) -> Plan:
@@ -375,6 +502,7 @@ _CONVERT_OPTIONS = (
     "fbx_preset",
     "with_animation",
     "animate_in_place",
+    "part_names",
 )
 
 
@@ -402,6 +530,9 @@ BUILDERS = {
     "tripo_animate": animate,
     "tripo_retopology": retopology,
     "tripo_convert": convert,
+    "tripo_parts": parts,
+    "tripo_uv": smart_uv,
+    "tripo_multiview": multiview,
 }
 
 # Tools that spend credits. rig_check creates a task but is free.

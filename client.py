@@ -15,7 +15,7 @@ import httpx
 from .plans import Upload
 
 DEFAULT_BASE = "https://openapi.tripo3d.ai/v3"
-USER_AGENT = "hermes-tripo/0.2.0"
+USER_AGENT = "hermes-tripo/0.3.0"
 TERMINAL = frozenset({"success", "failed", "cancelled", "banned", "expired"})
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -50,6 +50,25 @@ def tripo_home() -> Path:
     except ImportError:  # outside Hermes (tests, scripts)
         return Path(os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")) / "tripo"
     return Path(get_hermes_home()) / "tripo"
+
+
+def working_folder() -> Path:
+    """The agent's working folder (where a relative path in a chat points), else the process cwd."""
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+    except ImportError:  # outside Hermes (tests, scripts)
+        return Path.cwd()
+    try:
+        return Path(resolve_agent_cwd())
+    except OSError:
+        return Path.cwd()
+
+
+def local_path(raw: str) -> Path:
+    """``~`` expanded, and a relative path resolved against the agent's working folder: Desktop
+    hands file attachments to the agent as workspace-relative ``@file:`` references."""
+    path = Path(os.path.expanduser(raw.strip()))
+    return path if path.is_absolute() else working_folder() / path
 
 
 def api_key() -> str:
@@ -173,9 +192,7 @@ class Client:
     # -- files ---------------------------------------------------------------
 
     def upload(self, item: Upload) -> str:
-        path = Path(os.path.expanduser(item.path))
-        if not path.is_absolute():
-            raise TripoError(f"Local file paths must be absolute: {item.path}")
+        path = local_path(item.path)
         if not path.is_file():
             raise TripoError(f"File not found: {path}")
         allowed = IMAGE_TYPES if item.kind == "image" else MODEL_TYPES

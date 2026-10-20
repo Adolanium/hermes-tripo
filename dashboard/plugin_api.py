@@ -55,3 +55,8 @@ def preview(task_id: str):
 def save(task_id: str, body: dict | None = None):
     name = (body or {}).get("name") if isinstance(body, dict) else ""
     return _answer(lambda tripo: viewer.save_original(tripo, task_id, name if isinstance(name, str) else ""))
+
+
+@router.get("/library")
+def library():
+    return _answer(viewer.library)

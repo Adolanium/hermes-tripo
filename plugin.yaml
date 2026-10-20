@@ -1,5 +1,5 @@
 name: hermes-tripo
-version: "0.2.0"
+version: "0.3.0"
 description: "Tripo 3D for Hermes: text, image or multiview to 3D, retexturing, rigging, preset animations, retopology and format conversion on Tripo's v3 API, with an inline 3D viewer in Hermes Desktop. Hermes asks before every credit-spending call and shows the estimated cost. Unofficial; not affiliated with Tripo or VAST."
 author: Adolanium
 license: MIT
@@ -17,6 +17,9 @@ provides_tools:
   - tripo_animate
   - tripo_retopology
   - tripo_convert
+  - tripo_parts
+  - tripo_uv
+  - tripo_multiview
   - tripo_task
   - tripo_download
   - tripo_balance

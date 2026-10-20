@@ -12,11 +12,11 @@ from typing import Any
 
 from . import plans
 from .client import api_key
-from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET, remember_platform
+from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET, remember_platform, session_limit, spent
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def _has_key() -> bool:
@@ -26,13 +26,14 @@ def _has_key() -> bool:
         return False
 
 
-def spend_gate(tool_name: str = "", args: dict | None = None, **_: Any) -> dict | None:
+def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = "", **_: Any) -> dict | None:
     """``pre_tool_call``: send every credit-spending Tripo call to Hermes' approval prompt.
 
-    The prompt names the request and its estimated cost. ``rule_key`` is per
-    tool, so "allow for this session" covers later calls to the same tool.
-    Unattended runs (cron, ``chat -q``, a gateway nobody answers) cannot
-    approve and the call is refused, which is the point.
+    The prompt names the request, its estimated cost and what this chat has spent so far.
+    ``rule_key`` is per tool, so "allow for this session" covers later calls to the same tool,
+    until the chat's spend would pass ``TRIPO_SESSION_LIMIT`` (default 100 credits): from then on
+    each call gets its own key, so the user is asked again every time. Unattended runs (cron,
+    ``chat -q``, a gateway nobody answers) cannot approve and the call is refused.
     """
     if tool_name not in plans.PAID_TOOLS:
         return None
@@ -47,11 +48,16 @@ def spend_gate(tool_name: str = "", args: dict | None = None, **_: Any) -> dict 
             "message": f"Tripo {tool_name} spends credits (cost unknown)",
             "rule_key": f"tripo:{tool_name}",
         }
-    return {
-        "action": "approve",
-        "message": f"Tripo {plan.summary}: costs {plan.cost_text()} of your Tripo balance",
-        "rule_key": f"tripo:{tool_name}",
-    }
+    so_far = spent(session_id)
+    limit = session_limit()
+    message = f"Tripo {plan.summary}: costs {plan.cost_text()} of your Tripo balance"
+    if so_far:
+        message += f"; this chat has used about {so_far} so far"
+    rule_key = f"tripo:{tool_name}"
+    if limit and so_far + plan.credits > limit:
+        message += f" (over your {limit}-credit limit per chat, so Hermes asks every time)"
+        rule_key = f"tripo:over-limit:{session_id or 'unknown'}:{so_far}"
+    return {"action": "approve", "message": message, "rule_key": rule_key}
 
 
 def note_platform(session_id: str = "", platform: str = "", **_: Any) -> None:

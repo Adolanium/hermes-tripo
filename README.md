@@ -11,7 +11,7 @@
   Hermes Tripo gives Hermes [Tripo](https://www.tripo3d.ai)'s 3D generation: text, a photo or a few views become a textured model,
   which Hermes can then rig, animate, retopologize and convert for your engine, your AR viewer or your printer.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.2.0</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.3.0</sub>
 
   <br /><br />
 
@@ -24,7 +24,7 @@
 ## Powered by Hermes
 
 Hermes Tripo is a community-built plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) with two halves in
-one install. The agent half adds eleven `tripo_*` tools and a `hermes-tripo:workflow` skill and talks to Tripo's v3 API
+one install. The agent half adds fourteen `tripo_*` tools and a `hermes-tripo:workflow` skill and talks to Tripo's v3 API
 (`openapi.tripo3d.ai/v3`) directly, with no extra packages and no background process. The Desktop half adds an inline 3D
 viewer to the chat.
 
@@ -38,10 +38,15 @@ answer an approval prompt.
 | **Generate**<br />`tripo_generate_model` turns a prompt, a photo, or front/left/back/right views into a 3D model. v3.1 for detail, P1/P2 for clean low-poly game assets. | **Sketch first**<br />`tripo_generate_image` draws a 5-credit concept (T-pose, full figure, isolated asset) so you agree on the look before paying for 3D. |
 | **Retexture**<br />`tripo_texture` repaints an existing model from a prompt or a reference image, up to 8K. | **Rig and animate**<br />`tripo_rig_check` (free), `tripo_rig` and `tripo_animate` add a skeleton and preset motions: idle, walk, run, jump, and creature gaits. |
 | **Make it lighter**<br />`tripo_retopology` rebuilds the mesh at a target face count with clean topology, quads and fresh UVs. | **Ship it**<br />`tripo_convert` exports FBX for Unity and Unreal, USDZ for Apple AR, STL or 3MF for printing, GLTF for the web. |
-| **Wait and fetch**<br />`tripo_task` follows a job to the end; `tripo_download` saves the model and previews into your project. | **Know the balance**<br />`tripo_balance` shows available and frozen credits, and what recent tasks cost. |
+| **Change one part**<br />`tripo_parts` splits a model into named parts (helmet, sword, wheels), so you can repaint or export just one. | **Fresh UVs**<br />`tripo_uv` re-unwraps a model and re-bakes its textures, rig and animation, with a UV layout image for hand texturing. |
+| **Four views first**<br />`tripo_multiview` turns one image into front, left, back and right views, editable view by view, for cleaner 3D. | **Edit the concept**<br />`tripo_generate_image` also edits reference images: "same character, red armor", a T-pose, a cleaner photo for 3D. |
+| **Wait and fetch**<br />`tripo_task` follows a job to the end; `tripo_download` saves the model, previews and spin videos, and reports the rig and clips inside the file. | **Know the balance**<br />`tripo_balance` shows available and frozen credits, and what recent tasks cost. |
 
-Any input takes a Tripo `task_id`, a public URL or an absolute local path, so one result feeds the next step without
-regenerating: generate → rig → animate → convert, all from the same task.
+Any input takes a Tripo task id, a public URL or a local path (a photo you just attached works as is), so one result
+feeds the next step without regenerating: generate → rig → animate → convert, all from the same task.
+
+The skill knows the hand-offs too: open the result in Blender (with the Blender plugin), and the right export, scale
+and rig for Godot, Unity, Unreal, Roblox, the web, Apple AR and 3D printing.
 
 ## See it in 3D
 
@@ -63,6 +68,9 @@ In **Hermes Desktop** the result lands in the conversation itself. The agent wri
 
 Elsewhere the agent uses what the surface has: on **Telegram, Discord, Slack** and other chats it posts the preview
 render and the model file as attachments after a download; in the **CLI and TUI** it gives the saved paths.
+
+The **Tripo library** pane (in the layout menu, or ⌘K → "Open Tripo library") lists your recent Tripo tasks with
+thumbnails. Pick one to open it in the viewer, and "Ask about it" starts a message about that task.
 
 The viewer stays quiet in a long chat: it draws only while on screen, and each task's files are fetched once and cached.
 
@@ -95,6 +103,16 @@ Tripo image to 3D (v3.1-20260211, textured, detailed texture): costs about 50 cr
 | Animation | 10 each |
 | Retopology | 30–40 |
 | Convert | 5, or 10 with processing |
+| Split into parts / complete parts | 40 / 50 |
+| Smart UV | 20 |
+| Four views / edit a view | 10 / 5 |
+| Image edit | 5, or 10 with the premium models |
+
+### A limit per chat
+
+"Allow for this session" is handy, so there is a backstop: once a chat has spent about 100 credits, every further paid
+call asks again, and the prompt says how much the chat has used. Set `TRIPO_SESSION_LIMIT` in the profile's `.env` to
+change it, or to `0` to turn it off.
 
 ## Small decisions, already made
 

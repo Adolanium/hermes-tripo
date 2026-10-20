@@ -29,6 +29,15 @@ _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 
+# The picture that stands for a task: a render, a generated image, the front of a multiview set,
+# or a UV layout, in that order.
+_PREVIEW_KEYS = ("rendered_image_url", "image_url", "front_view_url", "uv_render_url")
+
+
+def preview_url(output: dict) -> str | None:
+    return next((output[key] for key in _PREVIEW_KEYS if isinstance(output.get(key), str)), None)
+
+
 def check_task_id(task_id: str) -> str:
     if not is_task_id(task_id):
         raise TripoError("Not a Tripo task id", status=400)
@@ -62,7 +71,7 @@ def task_state(client: Client, task_id: str) -> dict[str, Any]:
         "credits_consumed": data.get("credits_consumed"),
         "model_format": _suffix(model_url).lstrip(".") or None,
         "viewable": _suffix(model_url) in VIEWABLE,
-        "has_preview": bool(output.get("rendered_image_url") or output.get("image_url")),
+        "has_preview": bool(preview_url(output)),
         "downloads_dir": str(downloads_dir()),
     }
     for key in ("riggable", "rig_type"):
@@ -88,7 +97,7 @@ def _cached(client: Client, task_id: str, key: str, allowed: set[str] | dict[str
         if key == "model":
             url = output.get("model_url")
         else:
-            url = output.get("rendered_image_url") or output.get("image_url")
+            url = preview_url(output)
         if not isinstance(url, str) or not url.startswith(("https://", "http://")):
             raise TripoError(f"Task has no {key} file", status=404)
         suffix = _suffix(url)
@@ -186,3 +195,49 @@ def save_original(client: Client, task_id: str, name: str = "") -> dict[str, Any
         "bytes": target.stat().st_size,
         "format": source.suffix.lstrip("."),
     }
+
+
+LIBRARY_LIMIT = 60
+_TYPE_LABELS = {
+    "text_to_model": "Text to 3D",
+    "image_to_model": "Image to 3D",
+    "multiview_to_model": "Multiview to 3D",
+    "text_to_image": "Concept image",
+    "image_to_image": "Image edit",
+    "generate_image": "Image edit",
+    "generate_multiview_image": "Four views",
+    "edit_multiview_image": "Edited views",
+    "texture_model": "Retexture",
+    "animate_prerigcheck": "Rig check",
+    "rig_check": "Rig check",
+    "animate_rig": "Rig",
+    "rig": "Rig",
+    "animate_retarget": "Animation",
+    "retarget": "Animation",
+    "convert_model": "Convert",
+    "convert": "Convert",
+    "mesh_segmentation": "Parts",
+    "mesh_completion": "Part completion",
+    "highpoly_to_lowpoly": "Retopology",
+    "mesh_uv": "Smart UV",
+}
+
+
+def library(client: Client) -> dict[str, Any]:
+    """Recent tasks on this Tripo account, newest first, for the Desktop library pane."""
+    items = []
+    for row in client.usage():
+        if not isinstance(row, dict) or not is_task_id(str(row.get("task_id") or "")):
+            continue
+        kind = str(row.get("type") or "")
+        items.append(
+            {
+                "task_id": row["task_id"],
+                "type": kind,
+                "label": _TYPE_LABELS.get(kind, kind.replace("_", " ").capitalize() or "Task"),
+                "credits": row.get("credits_consumed"),
+                "created_at": row.get("created_at"),
+            }
+        )
+    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return {"items": items[:LIBRARY_LIMIT], "total": len(items)}

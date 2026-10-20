@@ -64,10 +64,16 @@ def test_local_image_is_uploaded_then_referenced(tripo, tmp_path):
     assert tripo.bodies("/v3/generation/image-to-model")[0]["input"] == "file_123"
 
 
-def test_relative_and_missing_paths_are_refused(tripo, tmp_path):
-    assert "absolute" in call("tripo_generate_model", image="photos/mug.png")["error"]
+def test_relative_paths_resolve_against_the_working_folder(tripo, tmp_path, monkeypatch):
+    from hermes_plugins.tripo import client as client_mod
+
+    monkeypatch.setattr(client_mod, "working_folder", lambda: tmp_path)
+    (tmp_path / "photos").mkdir()
+    (tmp_path / "photos" / "mug.png").write_bytes(b"PNG fake")
+    tripo.on("POST", "/v3/files", {"file_token": "file_rel"})
+    tripo.on("POST", "/v3/generation/image-to-model", {"task_id": "task_rel"})
+    assert call("tripo_generate_model", image="photos/mug.png")["task_id"] == "task_rel"
     assert "not found" in call("tripo_generate_model", image=str(tmp_path / "nope.png"))["error"]
-    assert tripo.requests == []
 
 
 def test_api_error_surfaces_code_and_hint(tripo):
@@ -165,10 +171,9 @@ def test_download_saves_model_first_without_sending_the_key(tripo, tmp_path):
     assert not list(tmp_path.glob("*.part"))
 
 
-def test_download_refuses_unfinished_tasks_and_relative_dirs(tripo):
+def test_download_refuses_unfinished_tasks(tripo):
     tripo.on("GET", "/v3/tasks/task_1", {"task_id": "task_1", "status": "running"})
     assert "not success" in call("tripo_download", task_id="task_1")["error"]
-    assert "absolute" in call("tripo_download", task_id="task_1", save_dir="models")["error"]
 
 
 def test_balance_and_usage(tripo):

@@ -1,7 +1,7 @@
 {
   "name": "hermes-tripo",
   "label": "Tripo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Task state and model files for the Hermes Tripo 3D viewer.",
   "tab": { "hidden": true },
   "entry": "index.js",

@@ -47,6 +47,23 @@ const CSS = `
 .htv-menu button:disabled{opacity:.5;cursor:default}
 .htv-menu small{color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent));white-space:nowrap}
 .htv-menu-head{padding:8px 8px 4px;font-size:11px;letter-spacing:.02em;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent))}
+.htl{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ui-text-primary,inherit);font:12px/1.4 var(--font-sans,system-ui)}
+.htl *{box-sizing:border-box}
+.htl-head{display:flex;align-items:center;gap:8px;padding:10px 12px 8px;font-weight:600;font-size:13px}
+.htl-head span{flex:1}
+.htl-body{flex:1;min-height:0;overflow:auto;padding:0 10px 12px}
+.htl-body .htv{margin:0 0 10px;max-width:none}
+.htl-body .htv-stage{height:260px}
+.htl-list{display:grid;gap:6px}
+.htl-row{display:flex;align-items:center;gap:10px;width:100%;padding:6px;border:1px solid transparent;border-radius:10px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.htl-row:hover{background:color-mix(in srgb,currentColor 6%,transparent)}
+.htl-row[aria-current="true"]{border-color:color-mix(in srgb,var(--accent,#7c6cff) 55%,transparent);background:color-mix(in srgb,var(--accent,#7c6cff) 10%,transparent)}
+.htl-thumb{flex:none;width:52px;height:52px;border-radius:8px;overflow:hidden;background:radial-gradient(circle at 50% 40%,color-mix(in srgb,var(--accent,#7c6cff) 18%,transparent),color-mix(in srgb,currentColor 5%,transparent));display:flex;align-items:center;justify-content:center;font-size:18px;opacity:.95}
+.htl-thumb img{width:100%;height:100%;object-fit:cover}
+.htl-text{min-width:0;flex:1}
+.htl-text b{display:block;font-weight:500}
+.htl-text small{display:block;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.htl-empty{padding:24px 8px;text-align:center;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent))}
 .htv-menu hr{border:0;border-top:1px solid color-mix(in srgb,currentColor 10%,transparent);margin:6px 2px}
 `
 
@@ -660,6 +677,128 @@ function TripoModel({ ctx, attrs, streaming }) {
   )
 }
 
+// One thumbnail fetch at a time: each first fetch also pulls the preview from Tripo's CDN.
+let thumbQueue = Promise.resolve()
+
+function Thumb({ ctx, taskId }) {
+  const box = useRef(null)
+  const [src, setSrc] = useState(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const element = box.current
+    let cancelled = false
+    const watcher = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      watcher.disconnect()
+      thumbQueue = thumbQueue.then(async () => {
+        if (cancelled) return
+        try {
+          const { data_url } = await call(ctx, `/preview/${taskId}`)
+          if (!cancelled) setSrc(data_url)
+        } catch {
+          if (!cancelled) setFailed(true)
+        }
+      })
+    })
+    watcher.observe(element)
+    return () => {
+      cancelled = true
+      watcher.disconnect()
+    }
+  }, [ctx, taskId])
+  return (
+    <span className="htl-thumb" ref={box} aria-hidden="true">
+      {src ? <img src={src} alt="" /> : failed ? '◇' : ''}
+    </span>
+  )
+}
+
+function when(value) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+/** Recent Tripo tasks on this account; pick one to open it in the viewer. */
+function LibraryPane({ ctx }) {
+  const [state, setState] = useState({ loading: true, items: [] })
+  const [selected, setSelected] = useState(null)
+  const [token, setToken] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setState(current => ({ ...current, loading: true, error: null }))
+    call(ctx, '/library')
+      .then(answer => !cancelled && setState({ loading: false, items: answer.items || [], total: answer.total }))
+      .catch(error => !cancelled && setState({ loading: false, items: [], error: explain(error.message) }))
+    return () => {
+      cancelled = true
+    }
+  }, [ctx, token])
+
+  const ask = async item => {
+    const text = `Tripo task ${item.task_id} (${item.label}): `
+    let placed = false
+    try {
+      placed = await host.composer.insertText(null, text, { mode: 'block' })
+    } catch {
+      placed = false
+    }
+    if (!placed && (await ctx.os?.writeClipboard?.(text))) notify('info', 'Task reference copied', 'Paste it into the chat.')
+  }
+
+  const current = state.items.find(item => item.task_id === selected)
+  return (
+    <div className="htl">
+      <div className="htl-head">
+        <span>Tripo library</span>
+        <button type="button" className="htv-btn" onClick={() => setToken(n => n + 1)} disabled={state.loading}>
+          {state.loading ? 'Loading...' : 'Refresh'}
+        </button>
+      </div>
+      <div className="htl-body">
+        {current && (
+          <>
+            <TripoModel key={current.task_id} ctx={ctx} attrs={{ task: current.task_id, label: current.label }} streaming={false} />
+            <div style={{ display: 'flex', gap: 6, margin: '-4px 0 12px' }}>
+              <button type="button" className="htv-btn" onClick={() => ask(current)}>
+                Ask about it
+              </button>
+              <button type="button" className="htv-btn" onClick={() => setSelected(null)}>
+                Close
+              </button>
+            </div>
+          </>
+        )}
+        {state.error ? (
+          <div className="htl-empty">{state.error}</div>
+        ) : !state.loading && !state.items.length ? (
+          <div className="htl-empty">No Tripo tasks on this account yet.</div>
+        ) : (
+          <div className="htl-list">
+            {state.items.map(item => (
+              <button
+                key={item.task_id}
+                type="button"
+                className="htl-row"
+                aria-current={item.task_id === selected}
+                onClick={() => setSelected(item.task_id)}
+              >
+                <Thumb ctx={ctx} taskId={item.task_id} />
+                <span className="htl-text">
+                  <b>{item.label}</b>
+                  <small>
+                    {[when(item.created_at), item.credits != null && `${item.credits} credits`].filter(Boolean).join(' · ')}
+                  </small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default {
   id: 'hermes-tripo',
   name: 'Hermes Tripo',
@@ -676,6 +815,28 @@ export default {
       data: {
         name: 'tripo-model',
         render: ({ attrs, streaming }) => <TripoModel ctx={ctx} attrs={attrs} streaming={streaming} />
+      }
+    })
+
+    ctx.register({
+      id: 'library',
+      area: 'panes',
+      title: 'Tripo',
+      data: { placement: 'right', width: '380px' },
+      render: () => <LibraryPane ctx={ctx} />
+    })
+    ctx.register({
+      id: 'open-library',
+      area: 'palette',
+      data: {
+        id: 'hermes-tripo.library',
+        label: 'Open Tripo library',
+        keywords: ['tripo', '3d', 'models', 'library'],
+        run: () => {
+          if (typeof host.openWorkspace === 'function') {
+            host.openWorkspace('hermes-tripo:library', { title: 'Tripo', render: () => <LibraryPane ctx={ctx} /> })
+          }
+        }
       }
     })
   }

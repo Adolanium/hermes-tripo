@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import glb, plans
-from .client import TERMINAL, Client, TripoError, tripo_home
+from . import glb, plans, viewer
+from .client import TERMINAL, Client, TripoError, local_path, tripo_home
 
 TOOLSET = "tripo"
 MAX_WAIT = 300
@@ -20,7 +19,7 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 _INPUT = (
     "A finished Tripo task id (a UUID), a file_token, a public https URL, "
-    "or an ABSOLUTE local file path (uploaded to Tripo first)."
+    "or a local file path (uploaded to Tripo first; relative paths resolve against the working folder)."
 )
 
 
@@ -42,7 +41,7 @@ SCHEMAS = {
     "tripo_generate_model": _schema(
         "tripo_generate_model",
         "Start a Tripo 3D generation task. SPENDS CREDITS (text 10-20, image 20-30, P series 30-50, "
-        "plus surcharges); Hermes asks the user first. Pass exactly one of prompt, image or views. "
+        "plus surcharges); Hermes asks the user first. Pass exactly one of prompt, image, views or multiview_task. "
         "Returns a task_id at once; follow with tripo_task to wait, then tripo_download. For multi-step "
         'jobs (rigging, game engines, printing, AR) first call skill_view(name="hermes-tripo:workflow") (exactly that name, no prefix).',
         {
@@ -61,6 +60,10 @@ SCHEMAS = {
                 "description": "Multiview to 3D: front plus at least one of left/back/right, same object "
                 "and lighting. Each value: " + _INPUT,
                 "properties": {view: {"type": "string"} for view in plans.VIEWS},
+            },
+            "multiview_task": {
+                "type": "string",
+                "description": "Multiview to 3D from the four views a tripo_multiview task made (its task id).",
             },
             "model": _enum(
                 plans.GEOMETRY_MODELS,
@@ -88,20 +91,50 @@ SCHEMAS = {
     ),
     "tripo_generate_image": _schema(
         "tripo_generate_image",
-        "Generate a 2D concept image (about 5 credits; Hermes asks first). Use it to agree on a look "
-        "before paying for 3D, then pass its task_id as tripo_generate_model image.",
+        "Make a 2D image (5 credits, 10 for chat_image/banana_pro/banana2 edits; Hermes asks first). "
+        "Text only: a concept to agree on before paying for 3D. With image or images: edit them, "
+        "transfer a style, or apply a template (t_pose, 3d_enhance, variants). Pass the result's "
+        "task id as tripo_generate_model image.",
         {
-            "prompt": {"type": "string", "description": "What to draw, most important first."},
-            "template": _enum(
-                plans.IMAGE_TEMPLATES,
-                "t_pose for characters you will rig; figure for a full "
-                "body; asset_extraction to isolate a subject.",
-            ),
-            "model": _enum(plans.IMAGE_MODELS, "Default seedream_v4."),
+            "prompt": {"type": "string", "description": "What to draw or change, most important first."},
+            "image": {"type": "string", "description": "One reference image to edit. " + _INPUT},
+            "images": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Up to 4 reference images to combine; refer to them as image[1], image[2].",
+            },
+            "template": {
+                "type": "string",
+                "enum": sorted(set(plans.IMAGE_TEMPLATES) | set(plans.EDIT_TEMPLATES)),
+                "description": "t_pose for characters you will rig; figure for a full body; asset_extraction "
+                "(text only) isolates a subject; 3d_enhance (edits) readies a photo for 3D; variants.",
+            },
+            "model": {
+                "type": "string",
+                "enum": sorted(set(plans.IMAGE_MODELS) | set(plans.EDIT_MODELS)),
+                "description": "Default seedream_v4 for text, seedream_v5 for edits.",
+            },
             "size": {"type": "string", "description": "e.g. 2048x2048 or 2K (seedream / chat_image)."},
             "aspect_ratio": {"type": "string", "description": "e.g. 1:1, 16:9 (banana models only)."},
         },
-        ["prompt"],
+    ),
+    "tripo_multiview": _schema(
+        "tripo_multiview",
+        "Make front, left, back and right views of one subject from a single image (10 credits), or "
+        "edit an earlier set view by view (5 per edited view); Hermes asks first. Multiview to 3D "
+        "gives better shapes than one image: pass the task id as tripo_generate_model views.",
+        {
+            "image": {"type": "string", "description": "The subject, on a clean background. " + _INPUT},
+            "input": {
+                "type": "string",
+                "description": "For edits: the task id of an earlier tripo_multiview.",
+            },
+            "edits": {
+                "type": "object",
+                "description": "For edits: view -> instruction, e.g. {'back': 'add a logo'}.",
+                "properties": {view: {"type": "string"} for view in plans.VIEWS},
+            },
+        },
     ),
     "tripo_texture": _schema(
         "tripo_texture",
@@ -118,6 +151,53 @@ SCHEMAS = {
             ),
             "pbr": _BOOL,
             "texture_seed": {"type": "integer"},
+            "part_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Texture only these parts (names from a tripo_parts segment task).",
+            },
+        },
+        ["input"],
+    ),
+    "tripo_parts": _schema(
+        "tripo_parts",
+        "Split a model into named parts (action segment, 40 credits), then optionally rebuild the "
+        "geometry hidden where parts met (action complete, 50). Hermes asks first. The part names "
+        "come back in tripo_task's result; use them with tripo_texture part_names (repaint one part) "
+        "or tripo_convert part_names (export some parts).",
+        {
+            "action": _enum(("segment", "complete"), "Default segment."),
+            "input": {
+                "type": "string",
+                "description": "segment: the model (" + _INPUT + ") complete: the segment task id.",
+            },
+            "model": _enum(
+                plans.SEGMENT_MODELS,
+                "Segment model: v1.0 geometric (default), v2.0 semantic, labelled parts.",
+            ),
+            "granularity": _enum(
+                ("simple", "balanced", "detailed"), "Segment v2.0 only: how finely to split."
+            ),
+            "part_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "complete: only these parts. Default all.",
+            },
+            "completion_mode": _enum(
+                plans.COMPLETION_MODES,
+                "complete: ai_completion (default, rebuilds shape) or quick_cap (seals holes).",
+            ),
+        },
+        ["input"],
+    ),
+    "tripo_uv": _schema(
+        "tripo_uv",
+        "Unwrap a model's UVs again and re-bake its textures, rig and animation onto the new layout "
+        "(20 credits; Hermes asks first). The result includes a UV layout image. The model must be "
+        "under 80,000 triangles: run tripo_retopology first if it is heavier.",
+        {
+            "input": {"type": "string", "description": "The model. " + _INPUT},
+            "bake": {"type": "boolean", "description": "Default true. false returns geometry with UVs only."},
         },
         ["input"],
     ),
@@ -197,6 +277,11 @@ SCHEMAS = {
             "fbx_preset": _enum(("blender", "3dsmax", "mixamo", "bake_scale"), "FBX target."),
             "with_animation": _BOOL,
             "animate_in_place": _BOOL,
+            "part_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Export only these parts (names from a tripo_parts segment task).",
+            },
         },
         ["input", "format"],
     ),
@@ -220,7 +305,7 @@ SCHEMAS = {
             "task_id": {"type": "string"},
             "save_dir": {
                 "type": "string",
-                "description": "ABSOLUTE directory to save into, normally in "
+                "description": "Directory to save into, normally in "
                 "the user's project. Default: "
                 "<HERMES_HOME>/tripo/<task_id>/.",
             },
@@ -271,6 +356,38 @@ def remember_platform(session_id: str, platform: str) -> None:
         _PLATFORMS.popitem(last=False)
 
 
+# session_id -> estimated credits this chat has spent through these tools (successful creates only).
+_SPENT: OrderedDict[str, int] = OrderedDict()
+DEFAULT_SESSION_LIMIT = 100
+
+
+def record_spend(session_id: str, credits: int) -> None:
+    if not session_id or credits <= 0:
+        return
+    _SPENT[session_id] = _SPENT.get(session_id, 0) + credits
+    _SPENT.move_to_end(session_id)
+    while len(_SPENT) > _PLATFORMS_MAX:
+        _SPENT.popitem(last=False)
+
+
+def spent(session_id: str) -> int:
+    return _SPENT.get(session_id or "", 0)
+
+
+def session_limit() -> int:
+    """Credits a chat may spend before every paid call asks again. ``TRIPO_SESSION_LIMIT``; 0 turns it off."""
+    from .client import _secret
+
+    try:
+        raw = _secret("TRIPO_SESSION_LIMIT").strip()
+    except TripoError:
+        raw = ""
+    try:
+        return max(0, int(raw)) if raw else DEFAULT_SESSION_LIMIT
+    except ValueError:
+        return DEFAULT_SESSION_LIMIT
+
+
 def _surface(session_id: str = "") -> str:
     """Where this turn is shown: 'desktop', a chat platform such as 'telegram', 'cli', or '' if unknown."""
     return _PLATFORMS.get(session_id or "", "")
@@ -303,7 +420,7 @@ def _task_view(data: dict, session_id: str = "") -> dict:
         )
         if files:
             view["output_files"] = files
-        preview = output.get("rendered_image_url") or output.get("image_url")
+        preview = viewer.preview_url(output)
         if preview:
             view["preview_url"] = preview
         facts = {key: value for key, value in output.items() if key not in files}
@@ -338,6 +455,7 @@ def _create_handler(tool: str) -> Callable[..., str]:
                 task_id = client.create(plan.endpoint, body)
         except TripoError as exc:
             return _err(str(exc), code=exc.code)
+        record_spend(session_id, plan.credits)
         shown = _show_hint(task_id, session_id, finished=False) if tool != "tripo_rig_check" else {}
         return _ok(
             task_id=task_id,
@@ -405,9 +523,7 @@ def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
         return _err("task_id is required")
     raw_dir = str(args.get("save_dir") or "").strip()
     if raw_dir:
-        target_dir = Path(os.path.expanduser(raw_dir))
-        if not target_dir.is_absolute():
-            return _err("save_dir must be an absolute path")
+        target_dir = local_path(raw_dir)
     else:
         target_dir = _default_dir(task_id)
     stem = _SAFE_NAME.sub("_", str(args.get("name") or task_id)).strip("._") or "tripo_model"

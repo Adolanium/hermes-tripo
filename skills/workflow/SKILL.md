@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: "Make 3D models with Tripo from text, a photo or several views, then retexture, rig, animate, retopologize, convert and download them. Use when the user wants a 3D model, game asset, rigged or animated character, AR file (USDZ) or a printable mesh, and the tripo plugin is enabled."
-version: 0.2.0
+version: 0.3.0
 author: Adolanium
 license: MIT
 metadata:
@@ -56,6 +56,12 @@ Tool results say how to show a model on the surface you are on; follow them.
   lines (`MEDIA:/path/...`). Put the preview line alone in your reply to post the render, and the
   model line to send the file.
 - **CLI and TUI:** give the saved paths in plain text.
+- **Turntable videos:** when a finished task lists `rendered_video_url` in `output_files`,
+  `tripo_download` saves it as `<name>_rendered_video.mp4`; on chat platforms its `attach` line
+  posts it, which shows a model better than a still.
+- **The Tripo library:** Desktop users can open past tasks from the Tripo pane (or ⌘K, "Open
+  Tripo library"). Its "Ask about it" button starts a message with `Tripo task <id> (<kind>):`;
+  treat that id as the source for whatever they ask next.
 
 ## Cost table (credits, estimates; the task reports the real `credits_consumed`)
 
@@ -65,7 +71,10 @@ Tool results say how to show a model on the surface you are on; follow them.
 | Image or multiview to 3D, v3.x / v2.5 | 20 untextured, 30 textured |
 | P1 / P2 (clean low-poly) | text 30/40, image 40/50 |
 | Add-ons | detailed texture +20, extreme +30, detailed geometry +20, quad +5, smart low-poly +10, parts +20 |
-| `tripo_generate_image` | 5 (GPT image models can cost more) |
+| `tripo_generate_image` | 5; edits with `chat_image*`, `banana_pro` or `banana2`: 10 |
+| `tripo_multiview` | 10 for four views; 5 per edited view |
+| `tripo_parts` | segment 40, complete 50 |
+| `tripo_uv` | 20 |
 | `tripo_texture` | 10 / 20 / 30 (standard / detailed / extreme), +5 with style_image |
 | `tripo_rig_check` | free |
 | `tripo_rig` | 25 |
@@ -82,10 +91,25 @@ New Tripo accounts come with free credits; `tripo_balance` shows what is left.
 with iron bands, stylized, hand-painted" beats "a chest". Add `texture=false` for a 10-credit
 shape check before paying for texture.
 
+**From a photo the user attached.** Hermes puts attachments in the message: an image arrives
+with `[Image attached at: <path>]`, a file as `@file:<path>`. Pass that path as is (without
+`@file:`) to `image`; relative paths resolve against the working folder. If you can see a picture
+but no path, ask the user to attach it as a file. For a busy photo, clean it first with
+`tripo_generate_image(image=<path>, template="3d_enhance")` (5), then use that task id.
+
 **From a photo.** `tripo_generate_model(image="/abs/path/photo.jpg")` (30). Local paths are
 uploaded to Tripo; clean backgrounds and an unobstructed subject work best. Several photos of
 the same object: pass `views={"front": ..., "back": ..., "left": ..., "right": ...}` (front is
 required, plus at least one more).
+
+**Best shape from one image.** `tripo_multiview(image=...)` (10) makes front, left, back and right
+views; show them, fix any with `tripo_multiview(input=<that id>, edits={"back": "..."})` (5 each),
+then `tripo_generate_model(multiview_task=<id>)` (30). Multiview gives cleaner backs and sides than
+a single image.
+
+**Edit the concept, not the model.** `tripo_generate_image(image=<image or task id>,
+prompt="same character, red armor")` (5) iterates on a look before any 3D is paid for; `images`
+takes up to four references ("put the hat from image[2] on image[1]").
 
 **Concept first.** `tripo_generate_image(prompt=..., template="figure")` (5) → show the user the
 preview (`tripo_task` returns its image URL) → on approval,
@@ -106,6 +130,24 @@ generation so the model is in real-world meters.
 
 **Too heavy.** `tripo_retopology(input=..., face_limit=...)` (35) for clean lower-poly
 topology, with `smart_uv=true` for fresh UVs.
+
+**Change one part.** `tripo_parts(input=<model>)` (40) splits it into named parts; `tripo_task`
+returns the names. Then `tripo_texture(input=<model>, part_names=["helmet"], prompt="polished
+gold")` repaints only those, or `tripo_convert(input=<model>, format="GLTF",
+part_names=["sword"])` exports just the sword. `tripo_parts(action="complete",
+input=<segment id>)` (50) rebuilds the geometry hidden where parts touched, before you export
+parts separately. Segment model `v2.0-20260430` labels parts semantically; add
+`granularity` to control how finely.
+
+**Fresh UVs for hand texturing.** `tripo_uv(input=<model>)` (20) re-unwraps and re-bakes textures,
+rig and animation; the result includes a UV layout image (`uv_render`). The input must be under
+80,000 triangles: `tripo_retopology` first if it is heavier.
+
+**Open it in Blender.** When the Blender plugin is enabled too, download first, then check the
+scene with its `get_objects_summary` and import with `execute_blender_code`, for example
+`bpy.ops.import_scene.gltf(filepath=r"<saved .glb>")` (or `import_scene.fbx` for FBX). Return
+`result = {"objects": [o.name for o in bpy.context.selected_objects]}` and tell the user what was
+imported. GLB keeps the PBR materials, the rig and every clip.
 
 **Different look, same shape.** `tripo_texture(input=<task_id>, prompt="...")` or with
 `image=` for a reference picture. When the source was image-generated, re-supply the image.
@@ -147,6 +189,27 @@ id, so a wrong rig family costs a rig, never a new model.
 needs rig v1.0, so no Mixamo bone naming; I can re-rig from the same model"). On Desktop, add the
 `show_in_chat` line; the viewer plays the first clip and lists the rest.
 
+## Game engines and apps
+
+| Target | Export | Notes |
+|---|---|---|
+| Godot 4 | keep GLB | Drop the `.glb` into the project; clips become an AnimationPlayer. |
+| Unity | `tripo_convert(format="FBX")` | Rig with `spec="unity"` for a Humanoid avatar (rig v3.0, so no dances). Generate with `auto_size=true`: 1 unit is 1 m. |
+| Unreal Engine | `tripo_convert(format="FBX")` | Rig with `spec="unreal"` for Mannequin bone names. Unreal works in centimetres: keep Convert Scene Unit on at import, or export with `scale_factor=100`. Add `animate_in_place=true` for locomotion clips. |
+| Roblox | `tripo_convert(format="FBX")` or `"OBJ"` | A MeshPart takes up to 20,000 triangles: generate with `face_limit` at or under that, or use a P model. |
+| Blender, Maya, 3ds Max | GLB for Blender; FBX for Maya; FBX with `fbx_preset="3dsmax"` for 3ds Max | See "Open it in Blender" above. |
+| Web, three.js | keep GLB | Small files: `face_limit` 10k–50k. |
+| Apple AR | `tripo_convert(format="USDZ")` | Generate with `auto_size=true`. |
+| 3D printing | `"STL"` or `"3MF"` with `flatten_bottom=true` | Untextured is enough; `scale_factor` sets the size. |
+
+## Spending limit
+
+Every paid call asks first. If the user picks "allow for this session" or "always", later calls
+to that tool stop asking until the chat has spent about 100 credits (`TRIPO_SESSION_LIMIT` in the
+profile's `.env`; `0` turns it off). Past the limit every paid call asks again, and the prompt
+says what the chat has used. Tell the user when you are close, and plan the remaining steps with
+their costs.
+
 ## Pitfalls
 
 - `quad=true` always outputs FBX.
@@ -155,7 +218,7 @@ needs rig v1.0, so no Mixamo bone naming; I can re-rig from the same model"). On
 - `geometry_quality="detailed"`, `quad`, `smart_low_poly`, `generate_parts` and `auto_size`
   do not work on v2.5.
 - `tripo_animate` needs the `task_id` of a finished `tripo_rig` task, not the original model.
-- Local paths must be absolute. Uploads are capped at 50 MB here; for larger files pass a
+- Relative paths resolve against the working folder. Uploads are capped at 50 MB here; for larger files pass a
   public URL.
 - Errors mentioning `TRIPO_API_KEY`, 401 or code 1000 mean the key is missing or wrong: the
   user adds `TRIPO_API_KEY=tsk_...` to the Hermes profile's `.env` and starts a new session.
