@@ -49,3 +49,9 @@ def model(task_id: str, chunk: int = 0):
 @router.get("/preview/{task_id}")
 def preview(task_id: str):
     return _answer(lambda tripo: viewer.preview(tripo, task_id))
+
+
+@router.post("/save/{task_id}")
+def save(task_id: str, body: dict | None = None):
+    name = (body or {}).get("name") if isinstance(body, dict) else ""
+    return _answer(lambda tripo: viewer.save_original(tripo, task_id, name if isinstance(name, str) else ""))

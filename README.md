@@ -54,6 +54,10 @@ In **Hermes Desktop** the result lands in the conversation itself. The agent wri
   chat. Spin, Wireframe, Reset, and Bigger for a taller stage.
 - **Watch it move.** Rigged and animated outputs play in place, with a picker for every clip (walk, run, idle...).
 - **Know what you got.** Format, file size, triangle count and the credits the task used, under the model.
+- **Take it with you.** **Download** saves the original file to `Downloads\Tripo` for free and shows it in
+  your file manager. Other formats (FBX, USDZ, GLTF, OBJ, STL, 3MF) are a click too: the viewer writes the
+  request into your message box, and once you send it the agent converts it on Tripo (5 credits) behind the
+  usual approval prompt. The viewer itself never spends credits.
 - **GLB, FBX, OBJ and STL** open in the viewer. Concept images, and formats it cannot open (USDZ, 3MF), show Tripo's
   preview render instead.
 
@@ -180,7 +184,8 @@ Hermes tripo_* tools  →  openapi.tripo3d.ai (Tripo)  →  your models, saved w
   files are uploaded only when a tool is given their path. See [Tripo's privacy policy](https://www.tripo3d.ai/privacy).
 - **Your key.** Sent to Tripo as a bearer token. The plugin reads it only through Hermes's secret scope, so each
   profile keeps its own key. It is never stored, logged, echoed in an error, or sent to the download CDN.
-- **What it writes.** The files you download, into the folder you name (default `<HERMES_HOME>/tripo/<task_id>/`), and
+- **What it writes.** The files you download, into the folder you name (default `<HERMES_HOME>/tripo/<task_id>/`),
+  the copies you save from the viewer's Download menu into `Downloads\Tripo` (never overwriting), and
   the viewer's copy of each model and preview it shows, under `<HERMES_HOME>/tripo/<task_id>/.viewer/`. Delete either
   folder at any time.
 - **The viewer.** The Desktop half talks only to this plugin's own backend (`/api/plugins/hermes-tripo/`), which reads

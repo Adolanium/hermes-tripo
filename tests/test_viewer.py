@@ -152,3 +152,29 @@ def test_plain_http_outputs_are_refused_from_the_real_api(tripo, home):
     with Client() as client, pytest.raises(TripoError, match="non-https"):
         viewer.model_chunk(client, "task_1", 0)
     assert not [r for r in tripo.requests if r.url.host == "cdn.example"]
+
+
+def test_save_original_copies_the_cached_model_without_overwriting(tripo, home, monkeypatch, tmp_path):
+    downloads = tmp_path / "Downloads" / "Tripo"
+    monkeypatch.setattr(viewer, "downloads_dir", lambda: downloads)
+    tripo.on("GET", "/v3/tasks/task_1", DONE)
+    tripo.on("GET", "/out/model.glb", httpx.Response(200, content=b"glTF-bytes"))
+    with Client() as client:
+        first = viewer.save_original(client, "task_1", "Cute Robot / rigged")
+        second = viewer.save_original(client, "task_1", "Cute Robot / rigged")
+        unnamed = viewer.save_original(client, "task_1")
+    assert first["path"] == str(downloads / "Cute Robot rigged.glb")
+    assert second["path"] == str(downloads / "Cute Robot rigged (2).glb")
+    assert unnamed["path"].endswith("tripo-task_1.glb") and first["format"] == "glb"
+    assert (downloads / "Cute Robot rigged.glb").read_bytes() == b"glTF-bytes"
+    assert len([r for r in tripo.requests if r.url.host == "cdn.example"]) == 1  # cached after the first
+
+
+def test_save_original_works_for_formats_the_viewer_cannot_show(tripo, home, monkeypatch, tmp_path):
+    monkeypatch.setattr(viewer, "downloads_dir", lambda: tmp_path / "dl")
+    usdz = {**DONE, "output": {"model_url": "https://cdn.example/out/model.usdz"}}
+    tripo.on("GET", "/v3/tasks/task_u", usdz)
+    tripo.on("GET", "/out/model.usdz", httpx.Response(200, content=b"PK usdz"))
+    with Client() as client:
+        saved = viewer.save_original(client, "task_u", "chair")
+    assert saved["path"].endswith("chair.usdz") and saved["format"] == "usdz"

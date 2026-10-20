@@ -8,6 +8,8 @@ every request after that is served from disk. Reads are free on Tripo's side.
 from __future__ import annotations
 
 import base64
+import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,8 @@ from .plans import is_task_id
 
 CHUNK_BYTES = 2 * 1024 * 1024
 VIEWABLE = {".glb", ".fbx", ".obj", ".stl"}
+# Everything Tripo exports (convert outputs included); saved as-is, only VIEWABLE ones render.
+DOWNLOADABLE = VIEWABLE | {".usdz", ".3mf", ".gltf", ".zip"}
 IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 _locks: dict[str, threading.Lock] = {}
@@ -57,6 +61,7 @@ def task_state(client: Client, task_id: str) -> dict[str, Any]:
         "model_format": _suffix(model_url).lstrip(".") or None,
         "viewable": _suffix(model_url) in VIEWABLE,
         "has_preview": bool(output.get("rendered_image_url") or output.get("image_url")),
+        "downloads_dir": str(downloads_dir()),
     }
     for key in ("riggable", "rig_type"):
         if key in output:
@@ -115,3 +120,34 @@ def preview(client: Client, task_id: str) -> dict[str, Any]:
     path = _cached(client, task_id, "preview", IMAGE_MIME)
     mime = IMAGE_MIME[path.suffix.lower()]
     return {"data_url": f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"}
+
+
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+def downloads_dir() -> Path:
+    """``<home>/Downloads/Tripo``: where the viewer's free 'save original' puts files."""
+    return Path.home() / "Downloads" / "Tripo"
+
+
+def save_original(client: Client, task_id: str, name: str = "") -> dict[str, Any]:
+    """Copy the model the viewer already holds into Downloads/Tripo. Free: no Tripo call when cached.
+
+    Never overwrites: an existing name gets " (2)", " (3)", ... appended.
+    """
+    source = _cached(client, task_id, "model", DOWNLOADABLE)
+    stem = " ".join(_SAFE_NAME.sub(" ", name or "").split()).strip(" .")[:80] or f"tripo-{task_id[-12:]}"
+    folder = downloads_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{stem}{source.suffix}"
+    count = 2
+    while target.exists():
+        target = folder / f"{stem} ({count}){source.suffix}"
+        count += 1
+    shutil.copyfile(source, target)
+    return {
+        "path": str(target),
+        "folder": str(folder),
+        "bytes": target.stat().st_size,
+        "format": source.suffix.lstrip("."),
+    }

@@ -4,6 +4,7 @@
 // a live progress card while Tripo works, then an orbitable model (GLB, FBX, OBJ or STL) with
 // auto-rotate, wireframe and animation playback. Data comes from this package's own backend
 // (dashboard/plugin_api.py) through ctx.rest; nothing here talks to Tripo or reads the disk.
+import { host } from '@hermes/plugin-sdk'
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -33,13 +34,20 @@ const CSS = `
 .htv-bar.is-wait>i{width:35%!important;animation:htv-slide 1.4s ease-in-out infinite}
 @keyframes htv-slide{0%{transform:translateX(-100%)}100%{transform:translateX(290%)}}
 .htv-preview{max-width:100%;max-height:100%;object-fit:contain}
-.htv-foot{display:flex;align-items:center;gap:6px;padding:6px 8px;border-top:1px solid var(--ui-stroke-secondary,color-mix(in srgb,currentColor 12%,transparent))}
+.htv-foot{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-top:1px solid var(--ui-stroke-secondary,color-mix(in srgb,currentColor 12%,transparent))}
 .htv-meta{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .htv-btn{border:0;background:transparent;color:inherit;font:inherit;padding:3px 7px;border-radius:6px;cursor:pointer;opacity:.75}
 .htv-btn:hover{opacity:1;background:color-mix(in srgb,currentColor 9%,transparent)}
 .htv-btn[aria-pressed="true"]{opacity:1;background:color-mix(in srgb,var(--accent,#7c6cff) 22%,transparent)}
 .htv-select{border:1px solid color-mix(in srgb,currentColor 18%,transparent);background:transparent;color:inherit;font:inherit;border-radius:6px;padding:2px 4px;max-width:150px}
 .htv-select option{color:#111}
+.htv-menu{position:absolute;right:8px;bottom:calc(100% + 6px);z-index:5;min-width:260px;padding:6px;border-radius:10px;border:1px solid var(--ui-stroke-secondary,color-mix(in srgb,currentColor 16%,transparent));background:var(--card,#1d1c24);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.htv-menu button{display:flex;width:100%;align-items:baseline;justify-content:space-between;gap:12px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:6px 8px;border-radius:6px;cursor:pointer}
+.htv-menu button:hover:not(:disabled){background:color-mix(in srgb,currentColor 9%,transparent)}
+.htv-menu button:disabled{opacity:.5;cursor:default}
+.htv-menu small{color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent));white-space:nowrap}
+.htv-menu-head{padding:8px 8px 4px;font-size:11px;letter-spacing:.02em;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent))}
+.htv-menu hr{border:0;border-top:1px solid color-mix(in srgb,currentColor 10%,transparent);margin:6px 2px}
 `
 
 const formatBytes = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
@@ -60,8 +68,8 @@ function explain(message) {
   return message
 }
 
-async function call(ctx, path) {
-  const answer = await ctx.rest(path, { timeoutMs: 180000 })
+async function call(ctx, path, opts = {}) {
+  const answer = await ctx.rest(path, { timeoutMs: 180000, ...opts })
   if (!answer || answer.ok !== true) throw new Error(answer?.error || 'The Tripo plugin backend did not answer')
   return answer
 }
@@ -349,6 +357,105 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
   return <div className="htv-stage" ref={host} title="Drag to orbit · right-drag to pan · Ctrl or ⌘ + scroll to zoom" />
 }
 
+// What tripo_convert can export, and what each is for.
+const FORMATS = [
+  ['FBX', 'Unity, Unreal, Blender'],
+  ['USDZ', 'Apple AR Quick Look'],
+  ['GLTF', 'web viewers'],
+  ['OBJ', 'any 3D app, no animation'],
+  ['STL', '3D printing'],
+  ['3MF', '3D printing, one color']
+]
+
+function notify(kind, message, detail) {
+  try {
+    host.notify({ kind, message, ...(detail ? { detail } : {}) })
+  } catch {
+    // An older host without toasts: the button state already says what happened.
+  }
+}
+
+/** Download menu: the original file for free, other formats as a request the user sends. */
+function DownloadMenu({ ctx, taskId, format, label, folder }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const box = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = event => {
+      if (event.type === 'keydown' ? event.key === 'Escape' : !box.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', close, true)
+    document.addEventListener('keydown', close, true)
+    return () => {
+      document.removeEventListener('pointerdown', close, true)
+      document.removeEventListener('keydown', close, true)
+    }
+  }, [open])
+
+  const saveOriginal = async () => {
+    setBusy(true)
+    try {
+      const saved = await call(ctx, `/save/${taskId}`, { method: 'POST', body: { name: label || '' } })
+      setOpen(false)
+      notify('success', `Saved ${saved.path.split(/[\\/]/).pop()}`, saved.folder)
+      ctx.os?.revealPath?.(saved.path)
+    } catch (error) {
+      notify('error', 'Could not save the model', error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Converting spends credits, so the viewer never calls Tripo itself: it drafts the request
+  // and the agent runs tripo_convert behind Hermes' approval prompt once the user sends it.
+  const requestConversion = async target => {
+    setOpen(false)
+    const text =
+      `Convert Tripo task ${taskId} to ${target} with tripo_convert, then download the result ` +
+      `to ${folder || 'my Downloads\\Tripo folder'}.`
+    let placed = false
+    try {
+      placed = await host.composer.insertText(null, text, { mode: 'block' })
+    } catch {
+      placed = false
+    }
+    if (placed) {
+      notify('info', `${target} request is in your message box`, 'Send it to convert. Hermes asks before spending credits.')
+    } else if (await ctx.os?.writeClipboard?.(text)) {
+      notify('info', 'Request copied', 'Paste it into the chat to convert.')
+    } else {
+      notify('error', 'Could not place the request', text)
+    }
+  }
+
+  const original = (format || 'model').toUpperCase()
+  return (
+    <span ref={box}>
+      <button type="button" className="htv-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(v => !v)}>
+        Download
+      </button>
+      {open && (
+        <div className="htv-menu" role="menu">
+          <button type="button" role="menuitem" disabled={busy} onClick={saveOriginal}>
+            <span>{busy ? 'Saving...' : `Original ${original}`}</span>
+            <small>free · Downloads\Tripo</small>
+          </button>
+          <hr />
+          <div className="htv-menu-head">Convert on Tripo · 5 credits, Hermes asks first</div>
+          {FORMATS.filter(([name]) => name !== original).map(([name, use]) => (
+            <button key={name} type="button" role="menuitem" onClick={() => requestConversion(name)}>
+              <span>{name}</span>
+              <small>{use}</small>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 function Progress({ label, value }) {
   const known = typeof value === 'number' && value > 0
   return (
@@ -541,6 +648,9 @@ function TripoModel({ ctx, attrs, streaming }) {
               Reset
             </button>
           </>
+        )}
+        {(state.phase === 'ready' || state.phase === 'preview') && task.model_format && (
+          <DownloadMenu ctx={ctx} taskId={taskId} format={model?.format || task.model_format} label={attrs.label} folder={task.downloads_dir} />
         )}
         <button type="button" className="htv-btn" aria-pressed={tall} onClick={() => setTall(v => !v)}>
           {tall ? 'Smaller' : 'Bigger'}
