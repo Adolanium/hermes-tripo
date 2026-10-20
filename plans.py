@@ -160,7 +160,9 @@ def generate_model(args: dict) -> Plan:
 
     parts = bool(args.get("generate_parts"))
     texture = args.get("texture", True) is not False
-    pbr = args.get("pbr", True) is not False
+    # PBR defaults on and forces texture on, so "texture: false" alone must switch PBR off too,
+    # or the caller is billed for a textured model they asked not to get.
+    pbr = args.get("pbr", texture) is not False
     if parts:
         if p_series or v25:
             raise PlanError("generate_parts needs a v3.x model")

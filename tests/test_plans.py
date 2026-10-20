@@ -130,3 +130,11 @@ def test_rig_check_is_free_and_not_gated():
     assert plans.rig_check({"input": "task_1"}).credits == 0
     assert "tripo_rig_check" not in plans.PAID_TOOLS
     assert plans.PAID_TOOLS >= {"tripo_generate_model", "tripo_rig", "tripo_animate", "tripo_convert"}
+
+
+def test_texture_false_alone_means_untextured():
+    plan = plans.generate_model({"prompt": "a small clay teapot", "texture": False})
+    assert plan.body["texture"] is False and plan.body["pbr"] is False
+    assert plan.credits == 10 and "untextured" in plan.summary
+    # An explicit pbr=true still wins, as Tripo documents.
+    assert plans.generate_model({"prompt": "x", "texture": False, "pbr": True}).body["texture"] is True
