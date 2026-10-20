@@ -178,3 +178,20 @@ def test_save_original_works_for_formats_the_viewer_cannot_show(tripo, home, mon
     with Client() as client:
         saved = viewer.save_original(client, "task_u", "chair")
     assert saved["path"].endswith("chair.usdz") and saved["format"] == "usdz"
+
+
+def test_downloads_follows_xdg_on_linux(monkeypatch, tmp_path):
+    monkeypatch.setattr(viewer.sys, "platform", "linux")
+    monkeypatch.setattr(viewer.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("XDG_DOWNLOAD_DIR", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    assert viewer.downloads_dir() == tmp_path / "Downloads" / "Tripo"  # no config: the plain default
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / "cfg" / "user-dirs.dirs").write_text(
+        'XDG_DOWNLOAD_DIR="$HOME/Téléchargements"\n', encoding="utf-8"
+    )
+    assert viewer.downloads_dir() == tmp_path / "Téléchargements" / "Tripo"
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(tmp_path / "dl"))
+    assert viewer.downloads_dir() == tmp_path / "dl" / "Tripo"
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", "relative/path")
+    assert viewer.downloads_dir() == tmp_path / "Downloads" / "Tripo"

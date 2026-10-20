@@ -8,8 +8,10 @@ every request after that is served from disk. Reads are free on Tripo's side.
 from __future__ import annotations
 
 import base64
+import os
 import re
 import shutil
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -125,9 +127,42 @@ def preview(client: Client, task_id: str) -> dict[str, Any]:
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 
 
+# Windows' known-folder id for Downloads, as stored under User Shell Folders.
+_WINDOWS_DOWNLOADS = "{374DE290-123F-4565-9164-39C4925E467B}"
+_SHELL_FOLDERS = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+
+
+def _system_downloads() -> Path | None:
+    """The Downloads folder the OS reports, which the user may have moved off the home folder."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _SHELL_FOLDERS) as handle:
+                value, _ = winreg.QueryValueEx(handle, _WINDOWS_DOWNLOADS)
+        except OSError:
+            return None
+        path = Path(os.path.expandvars(value)) if isinstance(value, str) and value else None
+        return path if path and path.is_absolute() else None
+    # Linux and other XDG desktops: XDG_DOWNLOAD_DIR in the environment, else user-dirs.dirs.
+    value = os.environ.get("XDG_DOWNLOAD_DIR", "")
+    if not value:
+        config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "user-dirs.dirs"
+        try:
+            match = re.search(
+                r'^XDG_DOWNLOAD_DIR="([^"]+)"', config.read_text(encoding="utf-8"), re.MULTILINE
+            )
+        except OSError:
+            match = None
+        value = match.group(1) if match else ""
+    value = value.replace("$HOME", str(Path.home()))
+    return Path(value) if value and Path(value).is_absolute() else None
+
+
 def downloads_dir() -> Path:
-    """``<home>/Downloads/Tripo``: where the viewer's free 'save original' puts files."""
-    return Path.home() / "Downloads" / "Tripo"
+    """``<Downloads>/Tripo``, where the viewer's free 'save original' puts files. Downloads is the
+    folder the OS reports (the Windows known folder, XDG on Linux), else ``~/Downloads``."""
+    return (_system_downloads() or Path.home() / "Downloads") / "Tripo"
 
 
 def save_original(client: Client, task_id: str, name: str = "") -> dict[str, Any]:
