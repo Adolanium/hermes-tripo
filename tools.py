@@ -44,7 +44,7 @@ SCHEMAS = {
         "Start a Tripo 3D generation task. SPENDS CREDITS (text 10-20, image 20-30, P series 30-50, "
         "plus surcharges); Hermes asks the user first. Pass exactly one of prompt, image or views. "
         "Returns a task_id at once; follow with tripo_task to wait, then tripo_download. For multi-step "
-        "jobs (rigging, game engines, printing, AR) load the skill hermes-tripo:workflow first.",
+        'jobs (rigging, game engines, printing, AR) first call skill_view(name="hermes-tripo:workflow") (exactly that name, no prefix).',
         {
             "prompt": {
                 "type": "string",
