@@ -103,6 +103,10 @@ Tripo image to 3D (v3.1-20260211, textured, detailed texture): costs about 50 cr
 - The right rig model is picked from the rig type and bone naming you ask for: creatures get v2.5, Unity/Unreal/VRM
   skeletons get v3.0.
 - Results leave out Tripo's long signed URLs; the agent sees file names, the preview link and the cost.
+- Downloads check what a GLB really holds (meshes, skins, joints, every animation clip) and hand
+  that to the agent, so "rigged" and "animated" are claims about the file, not about the task status.
+- The rig model is matched to the animation you want: dances live only on Tripo's v1.0 biped rig,
+  walk/run/idle and engine bone naming on v3.0, and the skill says which before any credits go.
 - Downloads go to the folder the agent names in your project, as `<name>.glb` plus `<name>_<preview>.<ext>`, written
   to a temporary file first and renamed when complete.
 

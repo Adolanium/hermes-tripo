@@ -31,6 +31,10 @@ approval prompt with the estimated cost before each one.
    look for a workaround. Say what you would run and what it costs.
 6. **Download promptly** with `tripo_download`, passing `save_dir` as an absolute path in the
    user's project (output URLs expire). Report each saved path and size.
+7. **Describe what the file holds, not what the task claims.** A `success` task was accepted and
+   billed; it does not prove a rig or a clip landed in the mesh. For a GLB, `tripo_download`
+   reports `contains`: skins and joints mean rigged, `clips` lists every animation. Say "rigged"
+   or "animated" only when it shows them.
 
 ## Show the result
 
@@ -87,14 +91,7 @@ that will be rigged.
 with `smart_low_poly=true` or a `face_limit` of 10k–100k. Then `tripo_convert(format="FBX")`
 for Unity/Unreal, or keep GLB for Godot, three.js and the web.
 
-**Rigged and animated character.** Generate in a T-pose (concept with `template="t_pose"`) →
-`tripo_rig_check` (free; `tripo_task` returns `riggable` and `rig_type`) →
-`tripo_rig(rig_type=...)` (25) → `tripo_animate(input=<rig task_id>, animations=[...])`
-(10 each). Humanoids: `preset:idle`, `preset:walk`, `preset:run`, `preset:jump`, ... with rig
-model v3.0 or v2.5. Rig model v1.0 (Tripo's default for bipeds) uses `preset:biped:*`
-names instead (for example `preset:biped:dance_01`). Pass `spec="unity"`, `"unreal"`,
-`"mixamo"` or `"vrm"` for the engine's bone naming. Use `animate_in_place=true` for engine
-locomotion.
+**Rigged and animated character.** See "Rigging and animation" below: the animation decides the rig.
 
 **Apple AR.** Generate, then `tripo_convert(format="USDZ")`. Add `auto_size=true` at
 generation so the model is in real-world meters.
@@ -107,6 +104,43 @@ topology, with `smart_uv=true` for fresh UVs.
 
 **Different look, same shape.** `tripo_texture(input=<task_id>, prompt="...")` or with
 `image=` for a reference picture. When the source was image-generated, re-supply the image.
+
+## Rigging and animation
+
+**Pick the rig model from the animation the user wants.** Preset families belong to one rig model
+each, the rig model is fixed at rig time, and a wrong pick wastes the 25-credit rig before
+`tripo_animate` fails.
+
+| Rig `model` | Use for | Presets |
+|---|---|---|
+| `v1.0-20240301` (Tripo's default for bipeds) | Dances and the long stylised library | `preset:biped:*`, 90+ clips: `preset:biped:dance_01`, `wave_goodbye_01`, `cheer`, ... |
+| `v3.0-20260909` | Best humanoid quality; engine bone naming (`spec="unity"`, `"unreal"`, `"mixamo"`, `"vrm"`, `"actorcore"`) | `preset:idle`, `walk`, `run`, `jump`, `climb`, `dive`, `slash`, `shoot`, `hurt`, `fall`, `turn` |
+| `v2.5-20260210` | Creatures | `preset:quadruped:walk`, `hexapod:walk`, `octopod:walk`, `serpentine:march`, `aquatic:march` |
+
+| The user asks for | Do |
+|---|---|
+| "make it dance" | `tripo_rig(rig_type="biped", model="v1.0-20240301")`, then `preset:biped:dance_01` |
+| A walk or idle loop | `tripo_rig(rig_type="biped", model="v3.0-20260909")`, then `preset:walk` / `preset:idle` |
+| Unity, Unreal, Mixamo or VRM | v3.0 with the `spec`; there is no dance on v3.0 |
+| A dance **and** engine bone naming | They exclude each other. Say which one you are giving up before spending anything |
+| In-engine locomotion | add `animate_in_place=true` so there is no root motion |
+| A dog, spider, snake or fish | let `tripo_rig_check` report the family, then that family's `walk` / `march` |
+
+**Pose it for the rigger.** Arms clear of the torso and legs apart, or the rig check fails. Put
+the pose in the prompt ("standing in an A-pose, arms held out and slightly down, legs straight
+and apart"); that is usually enough. A concept image with `template="t_pose"` (5) is the
+fallback when the text result comes out tangled.
+
+**Order:** `tripo_generate_model` (keep its id) → `tripo_rig_check` (free; `tripo_task` gives
+`riggable` and `rig_type`) → `tripo_rig(input=<generation id>, rig_type=..., model=...)` (25) →
+`tripo_animate(input=<rig id>, animations=[...])` (10 each, up to 5 per task, so batch the clips)
+→ `tripo_download` and read `contains`. A re-rig or a conversion starts from the same generation
+id, so a wrong rig family costs a rig, never a new model.
+
+**Report it like this:** a short table of step → task id → credits, what `contains` shows
+(skins, joints, clip names), the saved path, and one line on anything traded away ("the dance
+needs rig v1.0, so no Mixamo bone naming; I can re-rig from the same model"). On Desktop, add the
+`show_in_chat` line; the viewer plays the first clip and lists the rest.
 
 ## Pitfalls
 
@@ -126,4 +160,5 @@ topology, with `smart_uv=true` for fresh UVs.
 ## Verification
 
 - `tripo_balance` answers with a number: the key works.
-- After `tripo_download`, each reported path exists with a non-zero size.
+- After `tripo_download`, each reported path exists with a non-zero size, and for a rigged or
+  animated GLB, `contains` shows the skin and the clips you are about to describe.

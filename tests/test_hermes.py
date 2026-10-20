@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("hermes_cli.plugins")
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ("plugin.yaml", "__init__.py", "client.py", "plans.py", "tools.py", "viewer.py")
+FILES = ("plugin.yaml", "__init__.py", "client.py", "glb.py", "plans.py", "tools.py", "viewer.py")
 
 
 @pytest.fixture

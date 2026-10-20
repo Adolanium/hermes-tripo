@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import plans
+from . import glb, plans
 from .client import TERMINAL, Client, TripoError, tripo_home
 
 TOOLSET = "tripo"
@@ -137,9 +137,9 @@ SCHEMAS = {
             "rig_type": _enum(plans.RIG_TYPES, "From tripo_rig_check. Default biped."),
             "model": _enum(
                 plans.RIG_MODELS,
-                "v1.0 bipeds only (Tripo default, 90+ biped presets); "
-                "v2.5 creatures; v3.0 best humanoids and engine specs. "
-                "Chosen automatically from rig_type/spec when omitted.",
+                "Pick it from the animation you will apply: v1.0 for dances and other preset:biped:* "
+                "clips (Tripo's default for bipeds); v3.0 for preset:walk/idle/run... and engine specs "
+                "(no dances); v2.5 for creatures. Chosen from rig_type/spec when omitted.",
             ),
             "spec": _enum(plans.RIG_SPECS, "Bone naming for bipeds; unity/unreal/vrm/actorcore use v3.0."),
             "out_format": _enum(("glb", "fbx"), "Default glb."),
@@ -149,9 +149,10 @@ SCHEMAS = {
     "tripo_animate": _schema(
         "tripo_animate",
         "Apply preset animations to a rigged model (10 credits each, up to 5 per task; Hermes asks "
-        "first). Presets for rig v2.5/v3.0: preset:idle, walk, run, jump, climb, dive, slash, shoot, "
-        "hurt, fall, turn; preset:quadruped:walk, hexapod:walk, octopod:walk, serpentine:march, "
-        "aquatic:march. Rig v1.0 bipeds use preset:biped:* (e.g. preset:biped:dance_01).",
+        "first). The rig model decides which presets exist: rig v1.0 bipeds use preset:biped:* "
+        "(dances: preset:biped:dance_01, ...); rig v3.0 humanoids use preset:idle, walk, run, jump, climb, "
+        "dive, slash, shoot, hurt, fall, turn; rig v2.5 creatures use preset:quadruped:walk, hexapod:walk, "
+        "octopod:walk, serpentine:march, aquatic:march.",
         {
             "input": {"type": "string", "description": "task_id of a finished tripo_rig task."},
             "animations": {
@@ -438,12 +439,21 @@ def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
                 target = target_dir / filename
                 target_dir.mkdir(parents=True, exist_ok=True)
                 size = client.fetch(url, target)
-                saved.append({"file": label, "path": str(target), "bytes": size})
+                item = {"file": label, "path": str(target), "bytes": size}
+                if target.suffix.lower() == ".glb" and (contents := glb.summarize(target)):
+                    item["contains"] = contents
+                saved.append(item)
     except TripoError as exc:
         return _err(str(exc), code=exc.code)
     except OSError as exc:
         return _err(f"Could not write the file: {exc}")
-    return _ok(task_id=task_id, saved=saved, **_attach_hint(saved, session_id))
+    checked = [item["contains"] for item in saved if "contains" in item]
+    note = (
+        {"verify": "Describe only what 'contains' shows: skins/joints mean rigged, clips mean animated."}
+        if checked
+        else {}
+    )
+    return _ok(task_id=task_id, saved=saved, **note, **_attach_hint(saved, session_id))
 
 
 def tripo_balance(args: dict, **_: Any) -> str:
