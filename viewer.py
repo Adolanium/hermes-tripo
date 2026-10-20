@@ -8,17 +8,14 @@ every request after that is served from disk. Reads are free on Tripo's side.
 from __future__ import annotations
 
 import base64
-import re
 import threading
 from pathlib import Path
 from typing import Any
 
 from .client import TERMINAL, Client, TripoError, tripo_home
+from .plans import is_task_id
 
 CHUNK_BYTES = 2 * 1024 * 1024
-TASK_ID = re.compile(
-    r"^(task_[A-Za-z0-9_-]{1,120}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
-)
 VIEWABLE = {".glb", ".fbx", ".obj", ".stl"}
 IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
@@ -27,7 +24,7 @@ _locks_guard = threading.Lock()
 
 
 def check_task_id(task_id: str) -> str:
-    if not isinstance(task_id, str) or not TASK_ID.match(task_id):
+    if not is_task_id(task_id):
         raise TripoError("Not a Tripo task id", status=400)
     return task_id
 

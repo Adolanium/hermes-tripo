@@ -1,6 +1,6 @@
 // Hermes Tripo: an inline 3D viewer for Hermes Desktop.
 //
-// The agent writes `::tripo-model{task="task_..."}` alone on a line and this renders in the message:
+// The agent writes `::tripo-model{task="<task id>"}` alone on a line and this renders in the message:
 // a live progress card while Tripo works, then an orbitable model (GLB, FBX, OBJ or STL) with
 // auto-rotate, wireframe and animation playback. Data comes from this package's own backend
 // (dashboard/plugin_api.py) through ctx.rest; nothing here talks to Tripo or reads the disk.
@@ -15,7 +15,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 
 // Older SDKs do not export the constant; the area id is stable.
 const DIRECTIVE_AREA = 'transcript.directives'
-const TASK_ID = /^(task_[A-Za-z0-9_-]{1,120}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+const TASK_ID = /^(task_[A-Za-z0-9_-]{1,120}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 const POLL_MS = 3000
 const POLL_LIMIT_MS = 20 * 60 * 1000
 
@@ -50,6 +50,14 @@ function decode(base64) {
   const bytes = new Uint8Array(text.length)
   for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i)
   return bytes
+}
+
+/** Tripo's answer for a task id it does not know, said in words a person can act on. */
+function explain(message) {
+  if (/(1004|404)|invalid task_?id|not found/i.test(message || '')) {
+    return "This task isn't on your Tripo account (it may be from a test, another account, or has expired)."
+  }
+  return message
 }
 
 async function call(ctx, path) {
@@ -425,7 +433,7 @@ function TripoModel({ ctx, attrs, streaming }) {
         }
         await load(task)
       } catch (error) {
-        set({ phase: 'error', error: error.message })
+        set({ phase: 'error', error: explain(error.message) })
       }
     }
     poll()

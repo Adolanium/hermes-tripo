@@ -36,7 +36,7 @@ approval prompt with the estimated cost before each one.
 
 Tool results say how to show a model on the surface you are on; follow them.
 
-- **Hermes Desktop:** results carry `show_in_chat`, a line like `::tripo-model{task="task_..."}`.
+- **Hermes Desktop:** results carry `show_in_chat`, a line like `::tripo-model{task="<task id>"}`.
   Put it alone on its own line in your reply and Desktop renders an interactive 3D viewer there:
   orbit, auto-spin, wireframe, and playback for every animation clip. Right after a create it shows
   live progress and then the model, so you can reply at once instead of waiting with

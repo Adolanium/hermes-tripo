@@ -52,11 +52,21 @@ _P_SERIES_BASE = {"text": (30, 40), "image": (40, 50), "multiview": (40, 50)}
 _TEXTURE_SURCHARGE = {"fast": 0, "standard": 0, "detailed": 20, "extreme": 30}
 _TEXTURE_TASK = {"fast": 10, "standard": 10, "detailed": 20, "extreme": 30}
 
+# Tripo's task ids are UUIDs; its docs' examples write them as task_..., so accept both.
+_TASK_ID = re.compile(
+    r"^(task_[A-Za-z0-9_-]{1,120}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+
 # A string that is already a Tripo reference rather than a local path.
 _REFERENCE = re.compile(
     r"^(task_|file_)\S+$|^https?://\S+$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+
+
+def is_task_id(value: object) -> bool:
+    return isinstance(value, str) and bool(_TASK_ID.match(value))
 
 
 class PlanError(ValueError):
@@ -312,7 +322,7 @@ def rig(args: dict) -> Plan:
 
 def animate(args: dict) -> Plan:
     source = args.get("input")
-    if not isinstance(source, str) or not source.strip().startswith("task_"):
+    if not isinstance(source, str) or not _TASK_ID.match(source.strip()):
         raise PlanError("input must be the task_id of a finished tripo_rig task")
     animations = args.get("animations")
     if isinstance(animations, str):

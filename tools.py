@@ -19,7 +19,7 @@ DEFAULT_WAIT = 120
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 _INPUT = (
-    "A finished Tripo task_id (task_...), a file_token, a public https URL, "
+    "A finished Tripo task id (a UUID), a file_token, a public https URL, "
     "or an ABSOLUTE local file path (uploaded to Tripo first)."
 )
 

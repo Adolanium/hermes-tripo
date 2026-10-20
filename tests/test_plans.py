@@ -138,3 +138,11 @@ def test_texture_false_alone_means_untextured():
     assert plan.credits == 10 and "untextured" in plan.summary
     # An explicit pbr=true still wins, as Tripo documents.
     assert plans.generate_model({"prompt": "x", "texture": False, "pbr": True}).body["texture"] is True
+
+
+def test_real_uuid_task_ids_are_accepted():
+    uuid = "6f1c2a9e-3b4d-4e5f-8a7b-1c2d3e4f5a6b"
+    assert plans.animate({"input": uuid, "animations": ["walk"]}).body["input"] == uuid
+    assert plans.is_task_id(uuid.upper()) and plans.is_task_id("task_abc")
+    assert not plans.is_task_id("../etc") and not plans.is_task_id(" " + uuid)
+    assert plans.texture({"input": uuid}).body["input"] == uuid
