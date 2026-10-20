@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import glb, plans, viewer
-from .client import TERMINAL, Client, TripoError, local_path, tripo_home
+from .client import TERMINAL, Client, TripoError, free_stem, local_path, tripo_home
 
 TOOLSET = "tripo"
 MAX_WAIT = 300
@@ -516,6 +516,13 @@ def _attach_hint(saved: list[dict], task_id: str, session_id: str) -> dict:
     }
 
 
+def _tail(key: str, url: str) -> str:
+    """What follows the stem in a saved file's name: ``.glb`` for the model, ``_<output>.<ext>`` otherwise."""
+    if key == "model_url":
+        return _extension(url, ".glb")
+    return f"_{key.removesuffix('_url')}{_extension(url, '.bin')}"
+
+
 def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
     args = args or {}
     task_id = str(args.get("task_id") or "").strip()
@@ -546,15 +553,13 @@ def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
             if not urls:
                 return _err("The task has no downloadable files.", task=_task_view(data))
             saved = []
-            for key, url in sorted(urls.items(), key=lambda item: item[0] != "model_url"):
+            # Never overwrite: the agent picks save_dir, so it may hold earlier files of the same name.
+            ordered = sorted(urls.items(), key=lambda item: item[0] != "model_url")
+            tails = {key: _tail(key, url) for key, url in ordered}
+            stem = free_stem(target_dir, stem, list(tails.values()))
+            for key, url in ordered:
                 label = key.removesuffix("_url")
-                fallback = ".glb" if key == "model_url" else ".bin"
-                filename = (
-                    f"{stem}{_extension(url, fallback)}"
-                    if key == "model_url"
-                    else f"{stem}_{label}{_extension(url, fallback)}"
-                )
-                target = target_dir / filename
+                target = target_dir / f"{stem}{tails[key]}"
                 target_dir.mkdir(parents=True, exist_ok=True)
                 size = client.fetch(url, target)
                 item = {"file": label, "path": str(target), "bytes": size}

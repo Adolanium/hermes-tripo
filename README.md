@@ -11,7 +11,7 @@
   Hermes Tripo gives Hermes [Tripo](https://www.tripo3d.ai)'s 3D generation: text, a photo or a few views become a textured model,
   which Hermes can then rig, animate, retopologize and convert for your engine, your AR viewer or your printer.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.3.0</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.3.1</sub>
 
   <br /><br />
 
@@ -103,7 +103,9 @@ Tripo image to 3D (v3.1-20260211, textured, detailed texture): costs about 50 cr
 ```
 
 - The gate is a `pre_tool_call` hook, so the model cannot skip it. "Session" approves that tool until the session ends.
-- Free calls run without a prompt: `tripo_task`, `tripo_download`, `tripo_balance`, `tripo_rig_check`.
+- Free calls run without a prompt: `tripo_task`, `tripo_download`, `tripo_balance`, `tripo_rig_check`. The one
+  exception is sending a file: any call that would upload a local file to Tripo asks first, free or not, and the
+  card names the files.
 - Unattended runs (cron, `hermes chat -q`, a gateway nobody is watching) cannot approve, so paid calls are refused
   there. Cron follows your `approvals.cron_mode`.
 - Estimates follow [Tripo's price list](https://platform.tripo3d.ai/docs/billing). Tripo bills what a task actually
@@ -148,6 +150,8 @@ change it, or to `0` to turn it off.
   that to the agent, so "rigged" and "animated" are claims about the file, not about the task status.
 - The rig model is matched to the animation you want: dances live only on Tripo's v1.0 biped rig,
   walk/run/idle and engine bone naming on v3.0, and the skill says which before any credits go.
+- Downloads never overwrite: if `robot.glb` is already there, the next one is `robot (2).glb`, and its preview gets
+  the same number.
 - Downloads go to the folder the agent names in your project, as `<name>.glb` plus `<name>_<preview>.<ext>`, written
   to a temporary file first and renamed when complete.
 

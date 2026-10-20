@@ -111,6 +111,17 @@ class Plan:
         return f"{text} ({self.cost_note})" if self.cost_note else text
 
 
+def uploads(value: Any) -> list[Upload]:
+    """Every local file a request body would upload, in order."""
+    if isinstance(value, Upload):
+        return [value]
+    if isinstance(value, dict):
+        return [item for part in value.values() for item in uploads(part)]
+    if isinstance(value, list):
+        return [item for part in value for item in uploads(part)]
+    return []
+
+
 def reference(value: Any, kind: str, name: str = "input") -> str | Upload:
     """A task_id, file_token or URL passes through; anything else is a local path."""
     if not isinstance(value, str) or not value.strip():

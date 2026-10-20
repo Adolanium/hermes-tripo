@@ -16,7 +16,7 @@ from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET, remember_platform, session
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 
 def _has_key() -> bool:
@@ -26,16 +26,23 @@ def _has_key() -> bool:
         return False
 
 
-def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = "", **_: Any) -> dict | None:
-    """``pre_tool_call``: send every credit-spending Tripo call to Hermes' approval prompt.
+def _file_names(files: list[plans.Upload]) -> str:
+    names = [Path(item.path).name or item.path for item in files]
+    return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
 
-    The prompt names the request, its estimated cost and what this chat has spent so far.
-    ``rule_key`` is per tool, so "allow for this session" covers later calls to the same tool,
-    until the chat's spend would pass ``TRIPO_SESSION_LIMIT`` (default 100 credits): from then on
-    each call gets its own key, so the user is asked again every time. Unattended runs (cron,
+
+def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = "", **_: Any) -> dict | None:
+    """``pre_tool_call``: send every credit-spending Tripo call, and every local-file upload, to
+    Hermes' approval prompt.
+
+    The prompt names the request, its estimated cost, any local files it uploads, and what this chat
+    has spent so far. ``rule_key`` is per tool, so "allow for this session" covers later calls to the
+    same tool, until the chat's spend would pass ``TRIPO_SESSION_LIMIT`` (default 100 credits): from
+    then on each call gets its own key, so the user is asked again every time. A free call that would
+    upload a local file (``tripo_rig_check`` with a path) asks too. Unattended runs (cron,
     ``chat -q``, a gateway nobody answers) cannot approve and the call is refused.
     """
-    if tool_name not in plans.PAID_TOOLS:
+    if tool_name not in plans.BUILDERS:
         return None
     try:
         plan = plans.BUILDERS[tool_name](args or {})
@@ -45,12 +52,23 @@ def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = 
         logger.debug("tripo: could not price %s", tool_name, exc_info=True)
         return {
             "action": "approve",
-            "message": f"Tripo {tool_name} spends credits (cost unknown)",
+            "message": f"Tripo {tool_name} may spend credits or upload files (could not read the request)",
             "rule_key": f"tripo:{tool_name}",
+        }
+    files = plans.uploads(plan.body)
+    if tool_name not in plans.PAID_TOOLS:
+        if not files:
+            return None
+        return {
+            "action": "approve",
+            "message": f"Tripo {plan.summary} is free, but uploads {_file_names(files)} to Tripo",
+            "rule_key": f"tripo:upload:{tool_name}",
         }
     so_far = spent(session_id)
     limit = session_limit()
     message = f"Tripo {plan.summary}: costs {plan.cost_text()} of your Tripo balance"
+    if files:
+        message += f" and uploads {_file_names(files)} to Tripo"
     if so_far:
         message += f"; this chat has used about {so_far} so far"
     rule_key = f"tripo:{tool_name}"

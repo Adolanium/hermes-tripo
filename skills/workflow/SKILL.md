@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: "Make 3D models with Tripo from text, a photo or several views, then retexture, rig, animate, retopologize, convert and download them. Use when the user wants a 3D model, game asset, rigged or animated character, AR file (USDZ) or a printable mesh, and the tripo plugin is enabled."
-version: 0.3.0
+version: 0.3.1
 author: Adolanium
 license: MIT
 metadata:
@@ -13,7 +13,8 @@ metadata:
 
 The `tripo_*` tools drive Tripo's v3 API. Every call except `tripo_rig_check`, `tripo_task`,
 `tripo_download` and `tripo_balance` spends the user's Tripo credits, and Hermes shows an
-approval prompt with the estimated cost before each one.
+approval prompt with the estimated cost before each one. Any call that uploads a local file asks
+first too, even a free rig check.
 
 ## Ground rules
 

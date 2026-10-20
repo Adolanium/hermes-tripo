@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .client import TERMINAL, Client, TripoError, tripo_home
+from .client import TERMINAL, Client, TripoError, free_stem, tripo_home
 from .plans import is_task_id
 
 CHUNK_BYTES = 2 * 1024 * 1024
@@ -183,11 +183,7 @@ def save_original(client: Client, task_id: str, name: str = "") -> dict[str, Any
     stem = " ".join(_SAFE_NAME.sub(" ", name or "").split()).strip(" .")[:80] or f"tripo-{task_id[-12:]}"
     folder = downloads_dir()
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{stem}{source.suffix}"
-    count = 2
-    while target.exists():
-        target = folder / f"{stem} ({count}){source.suffix}"
-        count += 1
+    target = folder / f"{free_stem(folder, stem, [source.suffix])}{source.suffix}"
     shutil.copyfile(source, target)
     return {
         "path": str(target),

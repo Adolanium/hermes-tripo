@@ -15,7 +15,7 @@ import httpx
 from .plans import Upload
 
 DEFAULT_BASE = "https://openapi.tripo3d.ai/v3"
-USER_AGENT = "hermes-tripo/0.3.0"
+USER_AGENT = "hermes-tripo/0.3.1"
 TERMINAL = frozenset({"success", "failed", "cancelled", "banned", "expired"})
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -69,6 +69,16 @@ def local_path(raw: str) -> Path:
     hands file attachments to the agent as workspace-relative ``@file:`` references."""
     path = Path(os.path.expanduser(raw.strip()))
     return path if path.is_absolute() else working_folder() / path
+
+
+def free_stem(folder: Path, stem: str, suffixes: list[str]) -> str:
+    """``stem``, or ``stem (2)``, ``stem (3)``... so that no ``<stem><suffix>`` already exists in ``folder``.
+    Files saved together share one number, so a model and its preview keep matching names."""
+    candidate, count = stem, 2
+    while any((folder / f"{candidate}{suffix}").exists() for suffix in suffixes):
+        candidate = f"{stem} ({count})"
+        count += 1
+    return candidate
 
 
 def api_key() -> str:

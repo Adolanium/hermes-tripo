@@ -184,3 +184,44 @@ def test_turntable_video_is_saved_and_attached_on_chat_platforms(tripo, tmp_path
     result = json.loads(tools.HANDLERS["tripo_download"](args, session_id="tg-video"))
     assert (tmp_path / "robot_rendered_video.mp4").read_bytes() == b"mp4"
     assert f"MEDIA:{tmp_path / 'robot_rendered_video.mp4'}" in result["attach"]
+
+
+# -- review follow-ups: never overwrite downloads, gate free uploads -----------------------------
+
+
+def test_download_never_overwrites_and_keeps_a_batch_together(tripo, tmp_path):
+    tripo.on(
+        "GET",
+        "/v3/tasks/task_n",
+        {
+            "task_id": "task_n",
+            "status": "success",
+            "output": {
+                "model_url": "https://cdn.example/out/model.glb",
+                "rendered_image_url": "https://cdn.example/out/p.webp",
+            },
+        },
+    )
+    tripo.on("GET", "/out/model.glb", httpx.Response(200, content=b"glTF-new"))
+    tripo.on("GET", "/out/p.webp", httpx.Response(200, content=b"RIFF"))
+    (tmp_path / "robot.glb").write_bytes(b"precious")
+    args = {"task_id": "task_n", "save_dir": str(tmp_path), "name": "robot"}
+    first = json.loads(tools.HANDLERS["tripo_download"](args))
+    second = json.loads(tools.HANDLERS["tripo_download"](args))
+    assert (tmp_path / "robot.glb").read_bytes() == b"precious"
+    assert [item["path"] for item in first["saved"]] == [
+        str(tmp_path / "robot (2).glb"),
+        str(tmp_path / "robot (2)_rendered_image.webp"),
+    ]
+    assert second["saved"][0]["path"] == str(tmp_path / "robot (3).glb")
+
+
+def test_free_calls_that_upload_a_local_file_ask_first():
+    assert plugin.spend_gate(tool_name="tripo_rig_check", args={"input": UUID}) is None
+    directive = plugin.spend_gate(tool_name="tripo_rig_check", args={"input": "/home/me/hero.glb"})
+    assert directive["action"] == "approve" and "free, but uploads hero.glb" in directive["message"]
+    assert directive["rule_key"] == "tripo:upload:tripo_rig_check"
+    paid = plugin.spend_gate(tool_name="tripo_generate_model", args={"image": "/home/me/mug.png"})
+    assert "uploads mug.png to Tripo" in paid["message"]
+    views = plans.uploads(plans.generate_model({"views": {"front": "/a/f.png", "back": "/a/b.png"}}).body)
+    assert [item.path for item in views] == ["/a/f.png", "/a/b.png"]
