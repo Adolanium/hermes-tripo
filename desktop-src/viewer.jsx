@@ -22,7 +22,7 @@ const POLL_LIMIT_MS = 20 * 60 * 1000
 const CSS = `
 .htv{position:relative;margin:4px 0;max-width:640px;border:1px solid var(--ui-stroke-secondary,color-mix(in srgb,currentColor 14%,transparent));border-radius:12px;overflow:hidden;background:color-mix(in srgb,currentColor 4%,transparent);color:var(--ui-text-primary,inherit);font:12px/1.4 var(--font-sans,system-ui)}
 .htv *{box-sizing:border-box}
-.htv-stage{position:relative;height:340px;transition:height .2s ease}
+.htv-stage{position:relative;height:360px;transition:height .2s ease;background:radial-gradient(ellipse 70% 80% at 50% 38%,color-mix(in srgb,var(--accent,#8a7cff) 16%,transparent),transparent 72%),linear-gradient(180deg,color-mix(in srgb,currentColor 3%,transparent),color-mix(in srgb,#000 22%,transparent))}
 .htv.is-tall .htv-stage{height:560px}
 .htv-stage canvas{display:block;width:100%;height:100%;outline:none;cursor:grab}
 .htv-stage canvas:active{cursor:grabbing}
@@ -74,7 +74,7 @@ async function parseModel(format, buffer) {
   if (format === 'stl') {
     const geometry = new STLLoader().parse(buffer)
     geometry.computeVertexNormals()
-    const material = new THREE.MeshStandardMaterial({ color: 0xc9c8d8, roughness: 0.55, metalness: 0.05 })
+    const material = new THREE.MeshPhysicalMaterial({ color: 0xd9d7e6, roughness: 0.42, metalness: 0.05, clearcoat: 0.4 })
     return { object: new THREE.Mesh(geometry, material), clips: [] }
   }
   throw new Error(`Cannot show .${format} files`)
@@ -101,6 +101,61 @@ function disposeObject(object) {
   })
 }
 
+/** The app's accent color, so the stage glow matches the theme. */
+function accentColor(element) {
+  const value = getComputedStyle(element).getPropertyValue('--accent').trim()
+  try {
+    return new THREE.Color(value || '#8a7cff')
+  } catch {
+    return new THREE.Color('#8a7cff')
+  }
+}
+
+/** A soft round glow under the model, a thin ring, and an invisible floor that only shows shadows. */
+function makeStage(footprint, radius, accent) {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 256
+  const paint = canvas.getContext('2d')
+  const glow = paint.createRadialGradient(128, 128, 0, 128, 128, 128)
+  const rgb = `${Math.round(accent.r * 255)},${Math.round(accent.g * 255)},${Math.round(accent.b * 255)}`
+  glow.addColorStop(0, `rgba(${rgb},0.42)`)
+  glow.addColorStop(0.45, `rgba(${rgb},0.14)`)
+  glow.addColorStop(1, `rgba(${rgb},0)`)
+  paint.fillStyle = glow
+  paint.fillRect(0, 0, 256, 256)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+
+  const group = new THREE.Group()
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(footprint * 3.2, 64),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false })
+  )
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(footprint * 1.55, footprint * 1.58, 128),
+    new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false })
+  )
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(radius * 8, radius * 8),
+    new THREE.ShadowMaterial({ opacity: 0.5, depthWrite: false })
+  )
+  for (const mesh of [disc, ring, floor]) mesh.rotation.x = -Math.PI / 2
+  disc.position.y = radius * 0.001
+  ring.position.y = radius * 0.002
+  floor.receiveShadow = true
+  group.add(floor, disc, ring)
+  return {
+    group,
+    dispose: () => {
+      for (const mesh of [disc, ring, floor]) {
+        mesh.geometry.dispose()
+        mesh.material.dispose()
+      }
+      texture.dispose()
+    }
+  }
+}
+
 /** The WebGL stage. Owns renderer, camera, controls and the animation mixer. */
 function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStats }) {
   const host = useRef(null)
@@ -112,21 +167,27 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.1
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
     element.appendChild(renderer.domElement)
+    const accent = accentColor(element)
 
+    // Studio light: image-based fill, a warm key that casts the shadow, a cool rim for edges.
     const world = new THREE.Scene()
     const pmrem = new THREE.PMREMGenerator(renderer)
     const environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     world.environment = environment
-    world.add(new THREE.HemisphereLight(0xffffff, 0x404050, 0.6))
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4)
-    sun.position.set(3, 5, 4)
-    world.add(sun)
+    world.environmentIntensity = 0.5
+    world.add(new THREE.HemisphereLight(0xdfe4ff, 0x1a1626, 0.25))
+    const key = new THREE.DirectionalLight(0xfff1e0, 3.0)
+    const rim = new THREE.DirectionalLight(0xa9bbff, 3.2)
+    world.add(key, key.target, rim)
 
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000)
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 1000)
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
-    controls.autoRotateSpeed = 1.6
+    controls.autoRotateSpeed = 1.2
     // In a transcript the wheel must keep scrolling the chat: zoom only with Ctrl/Cmd held. This
     // capture listener on the wrapper runs before OrbitControls' own listener on the canvas.
     const gateZoom = event => {
@@ -140,22 +201,39 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
     const size = box.getSize(new THREE.Vector3())
     const center = box.getCenter(new THREE.Vector3())
     object.position.sub(new THREE.Vector3(center.x, box.min.y, center.z))
+    object.traverse(node => {
+      if (node.isMesh) node.castShadow = node.receiveShadow = true
+    })
     world.add(object)
     const radius = Math.max(size.length() / 2, 1e-3)
-    const grid = new THREE.GridHelper(radius * 4, 16, 0x888888, 0x888888)
-    grid.material.transparent = true
-    grid.material.opacity = 0.18
-    world.add(grid)
+
+    key.position.set(radius * 1.3, radius * 4.2, radius * 1.9)
+    rim.position.set(-radius * 2.6, radius * 1.8, -radius * 3)
+    key.castShadow = true
+    key.shadow.mapSize.set(2048, 2048)
+    key.shadow.bias = -0.0004
+    key.shadow.normalBias = radius * 0.01
+    Object.assign(key.shadow.camera, { left: -radius * 2.4, right: radius * 2.4, top: radius * 2.4, bottom: -radius * 2.4, near: radius * 0.5, far: radius * 10 })
+    key.shadow.camera.updateProjectionMatrix()
+
+    const stage = makeStage(Math.max(size.x, size.z) * 0.5, radius, accent)
+    world.add(stage.group)
+
     const home = () => {
-      const distance = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))
-      camera.position.set(distance * 0.55, size.y * 0.5 + distance * 0.35, distance * 0.8)
+      const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.08
+      camera.position.set(distance * 0.6, size.y * 0.5 + distance * 0.2, distance * 0.8)
       camera.near = radius / 100
       camera.far = distance * 20
       camera.updateProjectionMatrix()
-      controls.target.set(0, size.y / 2, 0)
+      controls.target.set(0, size.y * 0.48, 0)
       controls.update()
     }
     home()
+    // Reveal: the camera eases in from further out and the model settles into place.
+    const settled = camera.position.clone()
+    const introStart = performance.now()
+    const INTRO_MS = 1100
+    camera.position.copy(controls.target).add(settled.clone().sub(controls.target).multiplyScalar(1.45))
 
     const mixer = model.clips.length ? new THREE.AnimationMixer(object) : null
     const clock = new THREE.Clock()
@@ -168,6 +246,9 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
       renderer.setSize(width, height, false)
       camera.aspect = width / height
       camera.updateProjectionMatrix()
+      // Resizing clears the canvas; draw now rather than wait for the next animation frame, which a
+      // background or throttled window may not deliver for a while.
+      renderer.render(world, camera)
     }
     const sizer = new ResizeObserver(resize)
     sizer.observe(element)
@@ -187,6 +268,18 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
       }
       frame = requestAnimationFrame(loop)
       const delta = clock.getDelta()
+      const t = Math.min(1, (performance.now() - introStart) / INTRO_MS)
+      if (t < 1) {
+        const eased = 1 - Math.pow(1 - t, 3)
+        camera.position.lerpVectors(
+          controls.target.clone().add(settled.clone().sub(controls.target).multiplyScalar(1.45)),
+          settled,
+          eased
+        )
+        object.scale.setScalar(0.94 + 0.06 * eased)
+      } else if (object.scale.x !== 1) {
+        object.scale.setScalar(1)
+      }
       mixer?.update(delta)
       controls.update()
       renderer.render(world, camera)
@@ -205,8 +298,7 @@ function Stage({ model, autoRotate, wireframe, clip, playing, resetToken, onStat
       controls.dispose()
       mixer?.stopAllAction()
       disposeObject(object)
-      grid.geometry.dispose()
-      grid.material.dispose()
+      stage.dispose()
       environment.dispose()
       pmrem.dispose()
       renderer.dispose()
