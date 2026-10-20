@@ -15,7 +15,7 @@
 
   <br /><br />
 
-  [What it does](#from-a-sentence-to-a-mesh) &nbsp;·&nbsp; [See it in 3D](#see-it-in-3d) &nbsp;·&nbsp; [Credits](#every-credit-asked-for) &nbsp;·&nbsp; [Install it](#make-it-yours) &nbsp;·&nbsp; [Where your data goes](#privacy-you-can-explain-in-one-breath)
+  [What it does](#from-a-sentence-to-a-mesh) &nbsp;·&nbsp; [See it in 3D](#see-it-in-3d) &nbsp;·&nbsp; [Every tool](#every-tool) &nbsp;·&nbsp; [Credits](#every-credit-asked-for) &nbsp;·&nbsp; [Install it](#make-it-yours) &nbsp;·&nbsp; [Where your data goes](#privacy-you-can-explain-in-one-breath)
 
 </div>
 
@@ -73,6 +73,25 @@ The **Tripo library** pane (in the layout menu, or ⌘K → "Open Tripo library"
 thumbnails. Pick one to open it in the viewer, and "Ask about it" starts a message about that task.
 
 The viewer stays quiet in a long chat: it draws only while on screen, and each task's files are fetched once and cached.
+
+## Every tool
+
+| Tool | What it does | Credits |
+| --- | --- | --- |
+| `tripo_generate_model` | Text, a photo, four views or a `tripo_multiview` task to 3D. v3.1 / v3.0 / v2.5 for detail, P1 / P2 for clean low-poly. Texture and geometry quality, quad, smart low-poly, separate parts, real-world size. | 10–50, plus add-ons |
+| `tripo_generate_image` | A concept image from text, or an edit of up to four reference images. Templates: T-pose, full figure, isolate an asset, `3d_enhance` (ready a photo for 3D), variants. | 5, or 10 for premium edit models |
+| `tripo_multiview` | Front, left, back and right views from one image, then edits view by view. | 10, then 5 per edited view |
+| `tripo_texture` | Repaint a model from a prompt or reference image, up to 8K, the whole model or named parts. | 10 / 20 / 30 |
+| `tripo_parts` | Split a model into named parts, then rebuild the faces hidden where they touched. | 40, then 50 |
+| `tripo_uv` | Unwrap the UVs again and re-bake textures, rig and animation, with a UV layout image. | 20 |
+| `tripo_rig_check` | Can it be rigged, and as what: biped, quadruped, bird, snake... | free |
+| `tripo_rig` | A skeleton, with Tripo, Mixamo, Unity, Unreal, VRM or ActorCore bone names. | 25 |
+| `tripo_animate` | Up to five preset clips per task: idle, walk, run, jump, dances, creature gaits. | 10 each |
+| `tripo_retopology` | A lower face count with clean topology, optional quads and fresh UVs. | 30–40 |
+| `tripo_convert` | FBX, USDZ, GLTF, OBJ, STL or 3MF; scale, pivot, flat bottom, chosen parts. | 5, or 10 with options |
+| `tripo_task` | Status, progress, cost and results; waits up to two minutes per call. | free |
+| `tripo_download` | Saves the model, previews and spin videos, and reports the skins, joints and clips inside each GLB. | free |
+| `tripo_balance` | Available and frozen credits, and what recent tasks cost. | free |
 
 ## Every credit, asked for
 
@@ -156,6 +175,12 @@ Hermes Tripo needs Hermes Agent 0.21.6 or later. Start a new session, then ask:
 - "Turn ~/photos/mug.jpg into a 3D model."
 - "Design a knight character in a T-pose, rig it, and give it an idle and a walk for Unity."
 - "Convert that model to STL with a flat bottom so I can print it."
+- Attach a photo: "Turn this into a 3D model." The attachment is used as is.
+- "Make four views of this concept, fix the back, then build the model from them."
+- "Split the robot into parts and paint just the head gold."
+- "Unwrap the UVs on my robot so I can texture it in Substance."
+- "Open the dancing robot in Blender." (with the Blender plugin enabled too)
+- "How should I export this for Roblox?" (answered from the skill, nothing spent)
 
 ### China site
 
@@ -208,6 +233,10 @@ Hermes tripo_* tools  →  openapi.tripo3d.ai (Tripo)  →  your models, saved w
   folder at any time.
 - **The viewer.** The Desktop half talks only to this plugin's own backend (`/api/plugins/hermes-tripo/`), which reads
   task state from Tripo with your key and serves the cached files. It loads no remote code: three.js is bundled in.
+- **Your Tripo history.** When you open the library pane it fetches your recent tasks from Tripo
+  (`/v3/account/usage`) and, as each row scrolls into view, its preview image. Previews are cached like any viewer file.
+- **Finding Downloads.** For "Save original", the plugin asks the OS where your Downloads folder is: the Downloads
+  known-folder value in the Windows registry (read only), or `XDG_DOWNLOAD_DIR` on Linux, else `~/Downloads`.
 - **Which surface you are on.** A `pre_llm_call` hook notes each session's platform (desktop, telegram, cli...) in
   memory so results can say how to show a model there. It injects nothing into the prompt and stores nothing.
 - **Nothing else.** No shell commands, no background processes, no telemetry.
@@ -226,6 +255,8 @@ The plugin depends only on `httpx`, which Hermes already ships. It uses Tripo's 
 - Paid calls need someone to approve them, so they do not run from cron or one-shot `chat -q` unless your approval
   settings allow it.
 - Local uploads are capped at 50 MB. Pass a public URL for anything larger.
+- Smart UV takes models up to 80,000 triangles; retopologize heavier ones first.
+- The library pane shows your 60 most recent Tripo tasks.
 - Tripo runs a limited number of tasks at once per account (about 10 standard 3D jobs, 5 P-series). Extra requests
   are refused with a rate-limit error until one finishes.
 - Output links expire, so download soon after a task succeeds. The task itself can be fetched again for fresh links.
