@@ -129,6 +129,17 @@ def test_chat_platforms_are_told_how_to_attach_downloads(tripo, monkeypatch, tmp
     assert "attach" not in json.loads(tools.HANDLERS["tripo_download"](args, session_id="s-cli"))
 
 
+def test_desktop_downloads_point_at_the_viewer_not_a_file_card(tripo, tmp_path):
+    tripo.on("GET", "/v3/tasks/task_1", DONE)
+    tripo.on("GET", "/out/model.glb", httpx.Response(200, content=b"glTF"))
+    tripo.on("GET", "/p.webp", httpx.Response(200, content=b"RIFF"))
+    tools.remember_platform("s-desk2", "desktop")
+    args = {"task_id": "task_1", "save_dir": str(tmp_path)}
+    result = json.loads(tools.HANDLERS["tripo_download"](args, session_id="s-desk2"))
+    assert "attach" not in result
+    assert result["show_in_chat"] == '::tripo-model{task="task_1"}' and "MEDIA" in result["deliver"]
+
+
 def test_platform_memory_is_bounded():
     for index in range(tools._PLATFORMS_MAX + 50):
         tools.remember_platform(f"s{index}", "desktop")

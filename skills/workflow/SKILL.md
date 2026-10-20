@@ -46,7 +46,8 @@ Tool results say how to show a model on the surface you are on; follow them.
   live progress and then the model, so you can reply at once instead of waiting with
   `tripo_task`. It also shows concept images and the preview render of formats it cannot open
   (USDZ, 3MF). Add `label="..."` to name the card. The line works only alone; mid-sentence it
-  stays text.
+  stays text. Give saved paths as plain text; do not add `MEDIA:` lines for model files on
+  Desktop, since its file card cannot preview a GLB or FBX.
 - **Telegram, Discord, Slack and other chats:** after `tripo_download`, the result lists `attach`
   lines (`MEDIA:/path/...`). Put the preview line alone in your reply to post the render, and the
   model line to send the file.

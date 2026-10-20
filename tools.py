@@ -375,24 +375,26 @@ def _extension(url: str, fallback: str) -> str:
     return suffix if re.fullmatch(r"\.[a-z0-9]{1,5}", suffix) else fallback
 
 
-def _attach_hint(saved: list[dict], session_id: str) -> dict:
-    """On surfaces with an attachment channel, MEDIA:<path> sends a saved file to the user."""
+def _attach_hint(saved: list[dict], task_id: str, session_id: str) -> dict:
+    """How to hand the saved files to the user on this surface.
+
+    Chat platforms get MEDIA:<path> lines, the only way a file reaches the user there. Desktop does
+    not: the inline viewer already shows the model, and a MEDIA: card for a .glb only offers a
+    preview button that opens the binary.
+    """
     surface = _surface(session_id)
+    if surface == "desktop":
+        return {
+            "show_in_chat": directive(task_id),
+            "deliver": "Put show_in_chat alone on its own line for the 3D viewer and give the saved path "
+            "as text. Do not add MEDIA: lines for these files: Desktop cannot preview a model file.",
+        }
     if surface in _TEXT_ONLY or surface in _NOT_CHAT:
         return {}
-    preview = next((item["path"] for item in saved if item["file"] != "model"), None)
-    model = next((item["path"] for item in saved if item["file"] == "model"), None)
-    lines = []
-    if preview and surface != "desktop":
-        lines.append(f"MEDIA:{preview}")
-    if model:
-        lines.append(f"MEDIA:{model}")
-    if not lines:
-        return {}
-    where = "as a download card" if surface == "desktop" else "to the chat"
+    lines = [f"MEDIA:{item['path']}" for item in sorted(saved, key=lambda item: item["file"] == "model")]
     return {
         "attach": lines,
-        "attach_hint": f"Put any of these lines alone in your reply to send the file {where}.",
+        "attach_hint": "Put any of these lines alone in your reply to send the file to the chat.",
     }
 
 
@@ -453,7 +455,7 @@ def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
         if checked
         else {}
     )
-    return _ok(task_id=task_id, saved=saved, **note, **_attach_hint(saved, session_id))
+    return _ok(task_id=task_id, saved=saved, **note, **_attach_hint(saved, task_id, session_id))
 
 
 def tripo_balance(args: dict, **_: Any) -> str:
