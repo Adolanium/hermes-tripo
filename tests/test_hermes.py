@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("hermes_cli.plugins")
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ("plugin.yaml", "__init__.py", "client.py", "plans.py", "tools.py")
+FILES = ("plugin.yaml", "__init__.py", "client.py", "plans.py", "tools.py", "viewer.py")
 
 
 @pytest.fixture
@@ -62,3 +62,31 @@ def test_paid_call_is_refused_without_an_approver_and_names_the_cost(hermes, mon
     )
     assert "BLOCKED" in out and "about 40 credits" in out
     assert sent == []
+
+
+def test_desktop_sessions_get_the_viewer_line(hermes, monkeypatch):
+    import httpx
+    from hermes_cli.lifecycle import invoke_hook
+
+    done = {
+        "code": 0,
+        "data": {
+            "task_id": "task_1",
+            "status": "success",
+            "progress": 100,
+            "output": {"model_url": "https://cdn.example/m.glb"},
+        },
+    }
+    monkeypatch.setattr(
+        httpx.Client, "send", lambda self, request, **kw: httpx.Response(200, json=done, request=request)
+    )
+    invoke_hook(
+        "pre_llm_call", session_id="desk-1", platform="desktop", user_message="", conversation_history=[]
+    )
+    invoke_hook("pre_llm_call", session_id="cli-1", platform="cli", user_message="", conversation_history=[])
+    desk = hermes.handle_function_call(
+        "tripo_task", {"task_id": "task_1", "wait": False}, session_id="desk-1"
+    )
+    cli = hermes.handle_function_call("tripo_task", {"task_id": "task_1", "wait": False}, session_id="cli-1")
+    assert '::tripo-model{task=\\"task_1\\"}' in desk
+    assert "tripo-model" not in cli

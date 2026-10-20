@@ -15,7 +15,7 @@ import httpx
 from .plans import Upload
 
 DEFAULT_BASE = "https://openapi.tripo3d.ai/v3"
-USER_AGENT = "hermes-tripo/0.1.0"
+USER_AGENT = "hermes-tripo/0.2.0"
 TERMINAL = frozenset({"success", "failed", "cancelled", "banned", "expired"})
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -43,14 +43,32 @@ def _secret(name: str) -> str:
         raise TripoError(f"Could not read {name}: {exc}") from exc
 
 
+def tripo_home() -> Path:
+    """``<HERMES_HOME>/tripo``: default downloads and the viewer cache."""
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:  # outside Hermes (tests, scripts)
+        return Path(os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")) / "tripo"
+    return Path(get_hermes_home()) / "tripo"
+
+
 def api_key() -> str:
     return _secret("TRIPO_API_KEY").strip()
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _loopback_http(url: str) -> bool:
+    parts = urlparse(url)
+    return parts.scheme == "http" and (parts.hostname or "") in _LOOPBACK
+
+
 def base_url() -> str:
+    """Tripo's API, or ``TRIPO_API_BASE``: https, or plain http on this machine (a local test server)."""
     base = _secret("TRIPO_API_BASE").strip().rstrip("/") or DEFAULT_BASE
-    if urlparse(base).scheme != "https":
-        raise TripoError("TRIPO_API_BASE must be an https URL")
+    if urlparse(base).scheme != "https" and not _loopback_http(base):
+        raise TripoError("TRIPO_API_BASE must be an https URL (or http://127.0.0.1 for a local test server)")
     return base
 
 
@@ -222,7 +240,9 @@ class Client:
 
     def fetch(self, url: str, target: Path) -> int:
         """Stream a signed output URL to ``target``; returns the byte count."""
-        if urlparse(url).scheme != "https":
+        # Plain http only when the API itself is a local test server, and only to this machine.
+        local = _loopback_http(url) and _loopback_http(str(self._http.base_url))
+        if urlparse(url).scheme != "https" and not local:
             raise TripoError(f"Refusing non-https download URL: {url[:80]}")
         partial = target.with_name(target.name + ".part")
         written = 0

@@ -1,0 +1,17 @@
+{
+  "name": "hermes-tripo-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Source of desktop/plugin.js. `npm ci && npm run build` regenerates it.",
+  "scripts": {
+    "build": "esbuild viewer.jsx --bundle --format=esm --jsx=automatic --minify-syntax --minify-whitespace --target=es2022 --legal-comments=eof --external:react --external:react/jsx-runtime --external:@hermes/plugin-sdk --outfile=../desktop/plugin.js"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "react": "19.2.0"
+  }
+}

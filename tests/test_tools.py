@@ -214,3 +214,13 @@ def test_schemas_are_well_formed(name):
     properties = schema["parameters"]["properties"]
     assert set(schema["parameters"]["required"]) <= set(properties)
     assert len(schema["description"]) < 700
+
+
+def test_plain_http_is_only_for_a_local_test_server(monkeypatch):
+    from hermes_plugins.tripo import client as client_mod
+
+    monkeypatch.setenv("TRIPO_API_BASE", "http://example.com/v3")
+    with pytest.raises(client_mod.TripoError):
+        client_mod.base_url()
+    monkeypatch.setenv("TRIPO_API_BASE", "http://127.0.0.1:8772/v3")
+    assert client_mod.base_url() == "http://127.0.0.1:8772/v3"

@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: "Make 3D models with Tripo from text, a photo or several views, then retexture, rig, animate, retopologize, convert and download them. Use when the user wants a 3D model, game asset, rigged or animated character, AR file (USDZ) or a printable mesh, and the tripo plugin is enabled."
-version: 0.1.0
+version: 0.2.0
 author: Adolanium
 license: MIT
 metadata:
@@ -31,6 +31,22 @@ approval prompt with the estimated cost before each one.
    look for a workaround. Say what you would run and what it costs.
 6. **Download promptly** with `tripo_download`, passing `save_dir` as an absolute path in the
    user's project (output URLs expire). Report each saved path and size.
+
+## Show the result
+
+Tool results say how to show a model on the surface you are on; follow them.
+
+- **Hermes Desktop:** results carry `show_in_chat`, a line like `::tripo-model{task="task_..."}`.
+  Put it alone on its own line in your reply and Desktop renders an interactive 3D viewer there:
+  orbit, auto-spin, wireframe, and playback for every animation clip. Right after a create it shows
+  live progress and then the model, so you can reply at once instead of waiting with
+  `tripo_task`. It also shows concept images and the preview render of formats it cannot open
+  (USDZ, 3MF). Add `label="..."` to name the card. The line works only alone; mid-sentence it
+  stays text.
+- **Telegram, Discord, Slack and other chats:** after `tripo_download`, the result lists `attach`
+  lines (`MEDIA:/path/...`). Put the preview line alone in your reply to post the render, and the
+  model line to send the file.
+- **CLI and TUI:** give the saved paths in plain text.
 
 ## Cost table (credits, estimates; the task reports the real `credits_consumed`)
 

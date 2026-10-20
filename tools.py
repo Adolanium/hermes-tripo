@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from . import plans
-from .client import TERMINAL, Client, TripoError
+from .client import TERMINAL, Client, TripoError, tripo_home
 
 TOOLSET = "tripo"
 MAX_WAIT = 300
@@ -249,7 +250,47 @@ def _err(message: str, **data: Any) -> str:
     return json.dumps({"ok": False, "error": message, **data}, ensure_ascii=False)
 
 
-def _task_view(data: dict) -> dict:
+# Surfaces that render nothing beyond text, and those that are not chat channels.
+_TEXT_ONLY = frozenset({"cli", "tui"})
+_NOT_CHAT = frozenset({"", "local", "cron", "api_server", "acp", "webhook"})
+
+
+# session_id -> platform, filled by the pre_llm_call hook (see __init__.py). Bounded: a long-lived
+# gateway sees many sessions, and only the live ones matter.
+_PLATFORMS: OrderedDict[str, str] = OrderedDict()
+_PLATFORMS_MAX = 512
+
+
+def remember_platform(session_id: str, platform: str) -> None:
+    if not session_id:
+        return
+    _PLATFORMS[session_id] = (platform or "").strip().lower()
+    _PLATFORMS.move_to_end(session_id)
+    while len(_PLATFORMS) > _PLATFORMS_MAX:
+        _PLATFORMS.popitem(last=False)
+
+
+def _surface(session_id: str = "") -> str:
+    """Where this turn is shown: 'desktop', a chat platform such as 'telegram', 'cli', or '' if unknown."""
+    return _PLATFORMS.get(session_id or "", "")
+
+
+def directive(task_id: str) -> str:
+    return f'::tripo-model{{task="{task_id}"}}'
+
+
+def _show_hint(task_id: str, session_id: str, *, finished: bool) -> dict:
+    """How to put this task in front of the user on the current surface."""
+    if _surface(session_id) != "desktop":
+        return {}
+    what = "an interactive 3D viewer" if finished else "live progress, then an interactive 3D viewer"
+    return {
+        "show_in_chat": directive(task_id),
+        "show_hint": f"Put show_in_chat alone on its own line in your reply: Hermes Desktop renders it as {what}.",
+    }
+
+
+def _task_view(data: dict, session_id: str = "") -> dict:
     """The parts of a task the model needs, without long signed URLs."""
     view = {key: data.get(key) for key in ("task_id", "type", "status", "progress") if key in data}
     if data.get("credits_consumed") is not None:
@@ -273,6 +314,8 @@ def _task_view(data: dict) -> dict:
     status = data.get("status")
     if status == "success":
         view["next"] = "tripo_download to save the files; reuse this task_id for texture, rig, convert."
+        if data.get("task_id") and isinstance(output, dict) and (output.get("model_url") or preview):
+            view.update(_show_hint(data["task_id"], session_id, finished=True))
     elif status not in TERMINAL:
         view["next"] = "Still running: call tripo_task again with this task_id. Do not create a new task."
     else:
@@ -283,7 +326,7 @@ def _task_view(data: dict) -> dict:
 def _create_handler(tool: str) -> Callable[..., str]:
     build = plans.BUILDERS[tool]
 
-    def handler(args: dict, **_: Any) -> str:
+    def handler(args: dict, session_id: str = "", **_: Any) -> str:
         try:
             plan = build(args or {})
         except plans.PlanError as exc:
@@ -294,18 +337,20 @@ def _create_handler(tool: str) -> Callable[..., str]:
                 task_id = client.create(plan.endpoint, body)
         except TripoError as exc:
             return _err(str(exc), code=exc.code)
+        shown = _show_hint(task_id, session_id, finished=False) if tool != "tripo_rig_check" else {}
         return _ok(
             task_id=task_id,
             request=plan.summary,
             estimated_cost=plan.cost_text(),
             notes=plan.notes,
             next="Call tripo_task with this task_id to wait for the result.",
+            **shown,
         )
 
     return handler
 
 
-def tripo_task(args: dict, **_: Any) -> str:
+def tripo_task(args: dict, session_id: str = "", **_: Any) -> str:
     task_id = str((args or {}).get("task_id") or "").strip()
     if not task_id:
         return _err("task_id is required")
@@ -317,17 +362,11 @@ def tripo_task(args: dict, **_: Any) -> str:
             data = client.wait(task_id, seconds) if wait else client.task(task_id)
     except TripoError as exc:
         return _err(str(exc), code=exc.code)
-    return _ok(**_task_view(data))
+    return _ok(**_task_view(data, session_id))
 
 
 def _default_dir(task_id: str) -> Path:
-    try:
-        from hermes_constants import get_hermes_home
-
-        home = Path(get_hermes_home())
-    except ImportError:
-        home = Path(os.path.expanduser("~/.hermes"))
-    return home / "tripo" / _SAFE_NAME.sub("_", task_id)
+    return tripo_home() / _SAFE_NAME.sub("_", task_id)
 
 
 def _extension(url: str, fallback: str) -> str:
@@ -335,7 +374,28 @@ def _extension(url: str, fallback: str) -> str:
     return suffix if re.fullmatch(r"\.[a-z0-9]{1,5}", suffix) else fallback
 
 
-def tripo_download(args: dict, **_: Any) -> str:
+def _attach_hint(saved: list[dict], session_id: str) -> dict:
+    """On surfaces with an attachment channel, MEDIA:<path> sends a saved file to the user."""
+    surface = _surface(session_id)
+    if surface in _TEXT_ONLY or surface in _NOT_CHAT:
+        return {}
+    preview = next((item["path"] for item in saved if item["file"] != "model"), None)
+    model = next((item["path"] for item in saved if item["file"] == "model"), None)
+    lines = []
+    if preview and surface != "desktop":
+        lines.append(f"MEDIA:{preview}")
+    if model:
+        lines.append(f"MEDIA:{model}")
+    if not lines:
+        return {}
+    where = "as a download card" if surface == "desktop" else "to the chat"
+    return {
+        "attach": lines,
+        "attach_hint": f"Put any of these lines alone in your reply to send the file {where}.",
+    }
+
+
+def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
     args = args or {}
     task_id = str(args.get("task_id") or "").strip()
     if not task_id:
@@ -360,7 +420,7 @@ def tripo_download(args: dict, **_: Any) -> str:
             urls = {
                 key: value
                 for key, value in output.items()
-                if isinstance(value, str) and value.startswith("https://")
+                if isinstance(value, str) and value.startswith(("https://", "http://"))
             }
             if args.get("model_only"):
                 urls = {key: value for key, value in urls.items() if key == "model_url"}
@@ -383,7 +443,7 @@ def tripo_download(args: dict, **_: Any) -> str:
         return _err(str(exc), code=exc.code)
     except OSError as exc:
         return _err(f"Could not write the file: {exc}")
-    return _ok(task_id=task_id, saved=saved)
+    return _ok(task_id=task_id, saved=saved, **_attach_hint(saved, session_id))
 
 
 def tripo_balance(args: dict, **_: Any) -> str:

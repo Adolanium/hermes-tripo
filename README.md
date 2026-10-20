@@ -11,11 +11,11 @@
   Hermes Tripo gives Hermes [Tripo](https://www.tripo3d.ai)'s 3D generation: text, a photo or a few views become a textured model,
   which Hermes can then rig, animate, retopologize and convert for your engine, your AR viewer or your printer.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.1.0</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.2.0</sub>
 
   <br /><br />
 
-  [What it does](#from-a-sentence-to-a-mesh) &nbsp;·&nbsp; [Credits](#every-credit-asked-for) &nbsp;·&nbsp; [Install it](#make-it-yours) &nbsp;·&nbsp; [Where your data goes](#privacy-you-can-explain-in-one-breath)
+  [What it does](#from-a-sentence-to-a-mesh) &nbsp;·&nbsp; [See it in 3D](#see-it-in-3d) &nbsp;·&nbsp; [Credits](#every-credit-asked-for) &nbsp;·&nbsp; [Install it](#make-it-yours) &nbsp;·&nbsp; [Where your data goes](#privacy-you-can-explain-in-one-breath)
 
 </div>
 
@@ -23,9 +23,10 @@
 
 ## Powered by Hermes
 
-Hermes Tripo is a community-built tool plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds eleven
-`tripo_*` tools and a `hermes-tripo:workflow` skill, and it talks to Tripo's v3 API (`openapi.tripo3d.ai/v3`) directly, with no
-extra packages and no background process.
+Hermes Tripo is a community-built plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) with two halves in
+one install. The agent half adds eleven `tripo_*` tools and a `hermes-tripo:workflow` skill and talks to Tripo's v3 API
+(`openapi.tripo3d.ai/v3`) directly, with no extra packages and no background process. The Desktop half adds an inline 3D
+viewer to the chat.
 
 It works in the CLI, Hermes Desktop, the messaging gateway and subagents: anywhere Hermes runs tools and someone can
 answer an approval prompt.
@@ -41,6 +42,25 @@ answer an approval prompt.
 
 Any input takes a Tripo `task_id`, a public URL or an absolute local path, so one result feeds the next step without
 regenerating: generate → rig → animate → convert, all from the same task.
+
+## See it in 3D
+
+In **Hermes Desktop** the result lands in the conversation itself. The agent writes one line,
+`::tripo-model{task="task_..."}`, and the reply shows an interactive viewer in its place:
+
+- **Live while it cooks.** Right after a create, the card shows Tripo's queue and progress, then swaps in the model the
+  moment the task finishes. The agent does not have to sit and wait for it.
+- **Turn it over.** Drag to orbit, right-drag to pan, Ctrl or ⌘ + scroll to zoom; plain scrolling keeps scrolling the
+  chat. Spin, Wireframe, Reset, and Bigger for a taller stage.
+- **Watch it move.** Rigged and animated outputs play in place, with a picker for every clip (walk, run, idle...).
+- **Know what you got.** Format, file size, triangle count and the credits the task used, under the model.
+- **GLB, FBX, OBJ and STL** open in the viewer. Concept images, and formats it cannot open (USDZ, 3MF), show Tripo's
+  preview render instead.
+
+Elsewhere the agent uses what the surface has: on **Telegram, Discord, Slack** and other chats it posts the preview
+render and the model file as attachments after a download; in the **CLI and TUI** it gives the saved paths.
+
+The viewer stays quiet in a long chat: it draws only while on screen, and each task's files are fetched once and cached.
 
 ## Every credit, asked for
 
@@ -101,6 +121,9 @@ The installer asks for `TRIPO_API_KEY`. Create one in the [Tripo console](https:
 TRIPO_API_KEY=tsk_...
 ```
 
+For the 3D viewer, turn on the **Desktop** switch for Tripo in Hermes Desktop under **Capabilities → Plugins**. Like
+every Desktop plugin half, it ships switched off.
+
 Hermes Tripo needs Hermes Agent 0.21.6 or later. Start a new session, then ask:
 
 - "Make a low-poly treasure chest for Godot and save it in `assets/`."
@@ -127,14 +150,21 @@ The contract tests run the plugin through Hermes's real plugin discovery and app
 HERMES_SOURCE=/path/to/hermes-agent bash scripts/test.sh
 ```
 
+The Desktop viewer is built from `desktop-src/` (React and three.js, bundled with esbuild). CI rebuilds it and fails if
+the committed `desktop/plugin.js` differs:
+
+```sh
+cd desktop-src && npm ci && npm run build
+```
+
 Check the plugin the same way the catalog does:
 
 ```sh
 hermes plugins validate . --install-deps
 ```
 
-CI runs the unit tests on Linux, macOS and Windows, and the contract tests and validation against Hermes 0.21.6 and
-0.22.2 on Python 3.11 and 3.13.
+CI runs the unit tests on Linux, macOS and Windows, the contract tests against Hermes 0.21.6 and 0.22.2 on Python 3.11
+and 3.13, and catalog validation against current Hermes `main`.
 
 ## Privacy you can explain in one breath
 
@@ -146,14 +176,20 @@ Hermes tripo_* tools  →  openapi.tripo3d.ai (Tripo)  →  your models, saved w
   files are uploaded only when a tool is given their path. See [Tripo's privacy policy](https://www.tripo3d.ai/privacy).
 - **Your key.** Sent to Tripo as a bearer token. The plugin reads it only through Hermes's secret scope, so each
   profile keeps its own key. It is never stored, logged, echoed in an error, or sent to the download CDN.
-- **What it writes.** Only the files you download, into the folder you name (default `<HERMES_HOME>/tripo/<task_id>/`).
+- **What it writes.** The files you download, into the folder you name (default `<HERMES_HOME>/tripo/<task_id>/`), and
+  the viewer's copy of each model and preview it shows, under `<HERMES_HOME>/tripo/<task_id>/.viewer/`. Delete either
+  folder at any time.
+- **The viewer.** The Desktop half talks only to this plugin's own backend (`/api/plugins/hermes-tripo/`), which reads
+  task state from Tripo with your key and serves the cached files. It loads no remote code: three.js is bundled in.
+- **Which surface you are on.** A `pre_llm_call` hook notes each session's platform (desktop, telegram, cli...) in
+  memory so results can say how to show a model there. It injects nothing into the prompt and stores nothing.
 - **Nothing else.** No shell commands, no background processes, no telemetry.
 
 ## Compatibility
 
 | Hermes Agent | Python | Status |
 | --- | --- | --- |
-| 0.22.2 | 3.11, 3.13 | Tested in CI and by hand |
+| 0.22.2 | 3.11, 3.13 | Tested in CI and by hand, Desktop viewer included |
 | 0.21.6 (minimum) | 3.11, 3.13 | Tested in CI |
 
 The plugin depends only on `httpx`, which Hermes already ships. It uses Tripo's v3 API; Tripo retires v2 on 2026-10-31.

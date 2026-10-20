@@ -64,6 +64,52 @@ jobs:
           echo "HERMES_HOME=$RUNNER_TEMP/hermes-test-profile" >> "$GITHUB_ENV"
       - name: Contract tests
         run: bash plugin/scripts/test.sh
+
+  # The catalog's admission check, at the Hermes the catalog CI runs. Releases up to 0.22.2 carry
+  # an older Desktop lint that flags the bundled three.js setting fields on its own classes
+  # (fixed upstream in f8fc25a869); it runs only in `plugins validate`, never at install.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: Catalog validation · Hermes main
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: plugin
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: NousResearch/hermes-agent
+          ref: dfe787496a0ace8f3163c3bf86261c5bdf432253
+          path: hermes
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11'
+      - name: Prepare isolated Hermes environment
+        run: |
+          python -m venv "$RUNNER_TEMP/hermes-venv"
+          "$RUNNER_TEMP/hermes-venv/bin/python" -m pip install -e "$GITHUB_WORKSPACE/hermes"
       - name: Plugin validation
         working-directory: hermes
-        run: '"$HERMES_PYTHON" -m hermes_cli.main plugins validate "$GITHUB_WORKSPACE/plugin" --install-deps'
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-profile
+        run: '"$RUNNER_TEMP/hermes-venv/bin/python" -m hermes_cli.main plugins validate "$GITHUB_WORKSPACE/plugin" --install-deps'
+
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: Desktop bundle is reproducible
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Rebuild desktop/plugin.js from desktop-src and compare
+        working-directory: desktop-src
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          git diff --exit-code -- ../desktop/plugin.js

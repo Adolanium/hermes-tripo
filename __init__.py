@@ -12,11 +12,11 @@ from typing import Any
 
 from . import plans
 from .client import api_key
-from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET
+from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET, remember_platform
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def _has_key() -> bool:
@@ -54,6 +54,12 @@ def spend_gate(tool_name: str = "", args: dict | None = None, **_: Any) -> dict 
     }
 
 
+def note_platform(session_id: str = "", platform: str = "", **_: Any) -> None:
+    """``pre_llm_call``: remember where each session is shown, so tool results can say how to show a
+    model there (a viewer line on Desktop, attachments on chat platforms). Injects nothing."""
+    remember_platform(session_id, platform)
+
+
 def register(ctx: Any) -> None:
     for name, handler in HANDLERS.items():
         # tripo_balance stays visible without a key so the model can tell the user what is missing.
@@ -68,6 +74,7 @@ def register(ctx: Any) -> None:
             emoji=EMOJI.get(name, "🧊"),
         )
     ctx.register_hook("pre_tool_call", spend_gate)
+    ctx.register_hook("pre_llm_call", note_platform)
 
     skill = Path(__file__).parent / "skills" / "workflow" / "SKILL.md"
     if skill.is_file():
