@@ -887,7 +887,10 @@ function MadeFrom({ ctx, item }) {
     }
   }
 
-  const rigged = info?.chain?.some(step => step.tool === 'tripo_rig' || step.tool === 'tripo_animate') || /rig|retarget|animat/i.test(item.type || '')
+  const rigged = info?.chain?.some(step => step.tool === 'tripo_rig' || step.tool === 'tripo_animate') || /^(animate_)?(rig|retarget)$/i.test(item.type || '')
+  // A rig check is a verdict about a model: continue from that model, or not at all.
+  const isCheck = /rig_?check|prerigcheck/i.test(item.type || '') || info?.tool === 'tripo_rig_check'
+  const source = isCheck ? info?.parent : item.task_id
   return (
     <>
       {info?.known && (
@@ -913,7 +916,7 @@ function MadeFrom({ ctx, item }) {
             Open chat
           </button>
         )}
-        <ContinueMenu ctx={ctx} taskId={item.task_id} kind={item.type} rigged={rigged} />
+        {source && <ContinueMenu ctx={ctx} taskId={source} kind={isCheck ? 'text_to_model' : item.type} rigged={!isCheck && rigged} />}
         {(info?.files || []).slice(-1).map(path => (
           <button key={path} type="button" className="htv-btn" onClick={() => ctx.os?.revealPath?.(path)}>
             Show file

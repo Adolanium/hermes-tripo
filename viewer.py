@@ -271,6 +271,7 @@ def provenance(task_id: str) -> dict[str, Any]:
         "known": bool(steps),
         "task_id": task_id,
         "tool": record.get("tool"),
+        "parent": record.get("parent"),
         "session_id": first.get("session_id") if first else None,
         "prompt": first.get("prompt") if first else None,
         "made_at": first.get("created_at") if first else None,

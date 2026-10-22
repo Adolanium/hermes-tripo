@@ -57,6 +57,7 @@ def test_each_task_remembers_its_chat_prompt_and_parent(tripo):
     assert [step["label"] for step in made["chain"]] == ["3D model", "Rig", "Animation"]
     assert [step["task_id"] for step in made["chain"]] == [MODEL, RIG, DANCE]
     assert viewer.provenance(MODEL)["chain"][0]["tool"] == "tripo_generate_model"
+    assert viewer.provenance(DANCE)["parent"] == RIG and viewer.provenance(MODEL)["parent"] is None
 
 
 def test_unknown_tasks_say_so_and_bad_ids_are_refused():
@@ -64,6 +65,7 @@ def test_unknown_tasks_say_so_and_bad_ids_are_refused():
         "known": False,
         "task_id": MODEL,
         "tool": None,
+        "parent": None,
         "session_id": None,
         "prompt": None,
         "made_at": None,
