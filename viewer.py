@@ -1,4 +1,5 @@
-"""What the Desktop 3D viewer reads: a task's state, its model in chunks, its preview image.
+"""What the Desktop 3D viewer reads: a task's state, its model in chunks, its preview image, where
+it came from, local model files, and the balance for the status-bar chip.
 
 The Desktop plugin bridge only carries JSON, so files travel as base64 chunks. Each task's
 files are fetched from Tripo once and cached under ``<HERMES_HOME>/tripo/<task_id>/.viewer/``;
@@ -16,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import glb, history, settings
 from .client import TERMINAL, Client, TripoError, free_stem, tripo_home
 from .plans import is_task_id
 
@@ -109,8 +111,8 @@ def _cached(client: Client, task_id: str, key: str, allowed: set[str] | dict[str
         return target
 
 
-def model_chunk(client: Client, task_id: str, index: int) -> dict[str, Any]:
-    path = _cached(client, task_id, "model", VIEWABLE)
+def _chunk(path: Path, index: int) -> dict[str, Any]:
+    """One base64 chunk of a model file. The first also says what a GLB contains (rig, clips)."""
     size = path.stat().st_size
     chunks = max(1, -(-size // CHUNK_BYTES))
     if not 0 <= index < chunks:
@@ -118,13 +120,20 @@ def model_chunk(client: Client, task_id: str, index: int) -> dict[str, Any]:
     with path.open("rb") as handle:
         handle.seek(index * CHUNK_BYTES)
         data = handle.read(CHUNK_BYTES)
-    return {
+    answer = {
         "format": path.suffix.lstrip("."),
         "size": size,
         "chunks": chunks,
         "index": index,
         "data": base64.b64encode(data).decode("ascii"),
     }
+    if index == 0 and path.suffix.lower() == ".glb" and (contents := glb.summarize(path)):
+        answer["contains"] = contents
+    return answer
+
+
+def model_chunk(client: Client, task_id: str, index: int) -> dict[str, Any]:
+    return _chunk(_cached(client, task_id, "model", VIEWABLE), index)
 
 
 def preview(client: Client, task_id: str) -> dict[str, Any]:
@@ -169,8 +178,14 @@ def _system_downloads() -> Path | None:
 
 
 def downloads_dir() -> Path:
-    """``<Downloads>/Tripo``, where the viewer's free 'save original' puts files. Downloads is the
-    folder the OS reports (the Windows known folder, XDG on Linux), else ``~/Downloads``."""
+    """Where the viewer's free 'save original' puts files: the ``downloads_folder`` setting, else
+    ``<Downloads>/Tripo``. Downloads is the folder the OS reports (the Windows known folder, XDG on
+    Linux), else ``~/Downloads``."""
+    chosen = str(settings.get("downloads_folder", "") or "").strip()
+    if chosen:
+        path = Path(os.path.expandvars(os.path.expanduser(chosen)))
+        if path.is_absolute():
+            return path
     return (_system_downloads() or Path.home() / "Downloads") / "Tripo"
 
 
@@ -185,6 +200,7 @@ def save_original(client: Client, task_id: str, name: str = "") -> dict[str, Any
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / f"{free_stem(folder, stem, [source.suffix])}{source.suffix}"
     shutil.copyfile(source, target)
+    history.record_file(task_id, target)
     return {
         "path": str(target),
         "folder": str(folder),
@@ -222,18 +238,124 @@ _TYPE_LABELS = {
 def library(client: Client) -> dict[str, Any]:
     """Recent tasks on this Tripo account, newest first, for the Desktop library pane."""
     items = []
+    known = history.known()
     for row in client.usage():
         if not isinstance(row, dict) or not is_task_id(str(row.get("task_id") or "")):
             continue
         kind = str(row.get("type") or "")
-        items.append(
-            {
-                "task_id": row["task_id"],
-                "type": kind,
-                "label": _TYPE_LABELS.get(kind, kind.replace("_", " ").capitalize() or "Task"),
-                "credits": row.get("credits_consumed"),
-                "created_at": row.get("created_at"),
-            }
-        )
+        item = {
+            "task_id": row["task_id"],
+            "type": kind,
+            "label": _TYPE_LABELS.get(kind, kind.replace("_", " ").capitalize() or "Task"),
+            "credits": row.get("credits_consumed"),
+            "created_at": row.get("created_at"),
+        }
+        if row["task_id"] in known:
+            item["from_chat"] = known[row["task_id"]]
+        items.append(item)
     items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return {"items": items[:LIBRARY_LIMIT], "total": len(items)}
+
+
+def _step(record: dict) -> dict[str, Any]:
+    return {key: record.get(key) for key in ("task_id", "label", "tool", "created_at", "credits")}
+
+
+def provenance(task_id: str) -> dict[str, Any]:
+    """Where a task came from, for the library: its chat, prompt, and the chain of tasks behind it."""
+    check_task_id(task_id)
+    steps = history.chain(task_id)
+    first = history.origin(task_id)
+    record = steps[-1] if steps else {}
+    return {
+        "known": bool(steps),
+        "task_id": task_id,
+        "tool": record.get("tool"),
+        "parent": record.get("parent"),
+        "session_id": first.get("session_id") if first else None,
+        "prompt": first.get("prompt") if first else None,
+        "made_at": first.get("created_at") if first else None,
+        "chain": [_step(step) for step in steps],
+        "files": [path for path in record.get("files") or [] if Path(path).is_file()],
+    }
+
+
+LOCAL_LIMIT = 60
+
+
+def _roots() -> list[Path]:
+    """Folders local models may be read from: the home folder, Hermes' Tripo folder, Downloads/Tripo."""
+    roots = [Path.home(), tripo_home(), downloads_dir()]
+    return [root.resolve() for root in roots if root.is_dir()]
+
+
+def _allowed(path: Path) -> Path:
+    """A model file under one of the allowed roots, after following symlinks; else an error."""
+    try:
+        resolved = path.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise TripoError("No such file", status=404) from exc
+    if resolved.suffix.lower() not in VIEWABLE or not resolved.is_file():
+        raise TripoError("Only .glb, .fbx, .obj and .stl files open here", status=415)
+    if not any(resolved.is_relative_to(root) for root in _roots()):
+        raise TripoError("Only model files in your home folder open here", status=403)
+    return resolved
+
+
+def local_models() -> dict[str, Any]:
+    """Model files on this machine: ones saved from Tripo tasks, then whatever sits in Hermes'
+    Tripo folder or Downloads/Tripo. Newest first."""
+    candidates: dict[Path, str | None] = {Path(raw): task_id for raw, task_id in history.files().items()}
+    for folder in (tripo_home(), downloads_dir()):
+        if not folder.is_dir():
+            continue
+        for path in folder.rglob("*"):
+            if ".viewer" in path.parts or path.suffix.lower() not in VIEWABLE:
+                continue
+            candidates.setdefault(path, path.parent.name if is_task_id(path.parent.name) else None)
+    items = []
+    for path, task_id in candidates.items():
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if not path.is_file():
+            continue
+        items.append(
+            {
+                "path": str(path),
+                "name": path.name,
+                "folder": str(path.parent),
+                "bytes": stat.st_size,
+                "modified": stat.st_mtime,
+                "task_id": task_id,
+            }
+        )
+    items.sort(key=lambda item: item["modified"], reverse=True)
+    return {"items": items[:LOCAL_LIMIT], "total": len(items)}
+
+
+def local_chunk(raw_path: str, index: int) -> dict[str, Any]:
+    path = _allowed(Path(raw_path or ""))
+    answer = _chunk(path, index)
+    if index == 0:
+        answer["path"] = str(path)
+    return answer
+
+
+def balance(client: Client) -> dict[str, Any]:
+    data = client.balance()
+    return {"available": data.get("balance"), "frozen": data.get("frozen")}
+
+
+def spend(session_id: str) -> dict[str, Any]:
+    from .tools import session_limit, spent
+
+    return {"session_spent": spent(session_id or ""), "session_limit": session_limit()}
+
+
+def preferences() -> dict[str, Any]:
+    return {
+        "auto_spin": settings.as_bool(settings.get("auto_spin", True), True),
+        "downloads_dir": str(downloads_dir()),
+    }

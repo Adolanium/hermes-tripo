@@ -1,4 +1,4 @@
-"""Routes for the Desktop viewer: /api/plugins/hermes-tripo/{task,model,preview}/<task_id>.
+"""Routes for the Desktop viewer, library and status-bar chip under /api/plugins/hermes-tripo/.
 
 Every answer is HTTP 200 JSON, ``{"ok": true, ...}`` or ``{"ok": false, "error": ...}``, so the
 viewer handles failures in one place. Handlers are plain ``def``: FastAPI runs them in its
@@ -36,6 +36,14 @@ def _answer(work):
         return {"ok": False, "error": str(exc), "status": exc.status}
 
 
+def _local(work):
+    """Same answer shape, for routes that never talk to Tripo (and so need no API key)."""
+    try:
+        return {"ok": True, **work()}
+    except client.TripoError as exc:
+        return {"ok": False, "error": str(exc), "status": exc.status}
+
+
 @router.get("/task/{task_id}")
 def task(task_id: str):
     return _answer(lambda tripo: viewer.task_state(tripo, task_id))
@@ -60,3 +68,33 @@ def save(task_id: str, body: dict | None = None):
 @router.get("/library")
 def library():
     return _answer(viewer.library)
+
+
+@router.get("/history/{task_id}")
+def provenance(task_id: str):
+    return _local(lambda: viewer.provenance(task_id))
+
+
+@router.get("/local")
+def local_models():
+    return _local(viewer.local_models)
+
+
+@router.get("/local/model")
+def local_model(path: str = "", chunk: int = 0):
+    return _local(lambda: viewer.local_chunk(path, chunk))
+
+
+@router.get("/balance")
+def balance():
+    return _answer(viewer.balance)
+
+
+@router.get("/spend")
+def spend(session: str = ""):
+    return _local(lambda: viewer.spend(session))
+
+
+@router.get("/settings")
+def settings():
+    return _local(viewer.preferences)

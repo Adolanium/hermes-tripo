@@ -1,5 +1,5 @@
 name: hermes-tripo
-version: "0.3.1"
+version: "0.4.0"
 description: "Tripo 3D for Hermes: text, image or multiview to 3D, retexturing, rigging, preset animations, retopology and format conversion on Tripo's v3 API, with an inline 3D viewer in Hermes Desktop. Hermes asks before every credit-spending call and shows the estimated cost. Unofficial; not affiliated with Tripo or VAST."
 author: Adolanium
 license: MIT
@@ -33,3 +33,20 @@ requires_env:
     description: "Tripo API key (starts with tsk_). Create one in the Tripo developer console under API Keys."
     url: https://platform.tripo3d.ai/api-keys
     secret: true
+
+config_schema:
+  session_limit:
+    type: int
+    default: 100
+    label: "Credits per chat before every call asks"
+    description: "After a chat has spent this many Tripo credits, every paid call asks again, even ones you allowed for the session. 0 turns the limit off. Overrides TRIPO_SESSION_LIMIT."
+  downloads_folder:
+    type: str
+    default: ""
+    label: "Viewer download folder"
+    description: "Where the viewer's free Download > Original saves models. Empty means Downloads/Tripo."
+  auto_spin:
+    type: bool
+    default: true
+    label: "Spin models in the viewer"
+    description: "Start each 3D viewer slowly turning. Turn it off to start still."

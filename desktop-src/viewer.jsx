@@ -2,8 +2,10 @@
 //
 // The agent writes `::tripo-model{task="<task id>"}` alone on a line and this renders in the message:
 // a live progress card while Tripo works, then an orbitable model (GLB, FBX, OBJ or STL) with
-// auto-rotate, wireframe and animation playback. Data comes from this package's own backend
-// (dashboard/plugin_api.py) through ctx.rest; nothing here talks to Tripo or reads the disk.
+// auto-rotate, wireframe and animation playback. The same viewer opens local model files, and a
+// library pane shows where each task came from. A status-bar chip shows the Tripo balance and what
+// the focused chat has spent. Data comes from this package's own backend (dashboard/plugin_api.py)
+// through ctx.rest; nothing here talks to Tripo or reads the disk.
 import { host } from '@hermes/plugin-sdk'
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -65,6 +67,23 @@ const CSS = `
 .htl-text small{display:block;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .htl-empty{padding:24px 8px;text-align:center;color:var(--ui-text-tertiary,color-mix(in srgb,currentColor 55%,transparent))}
 .htv-menu hr{border:0;border-top:1px solid color-mix(in srgb,currentColor 10%,transparent);margin:6px 2px}
+.htv-badge{flex:none;padding:1px 7px;border-radius:999px;font-size:11px;background:color-mix(in srgb,var(--accent,#7c6cff) 18%,transparent)}
+.htv-badge.is-static{background:color-mix(in srgb,currentColor 9%,transparent)}
+.htl-tabs{display:flex;gap:4px;padding:0 10px 8px}
+.htl-tabs button{flex:1}
+.htl-actions{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 10px;position:relative}
+.htl-made{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,currentColor 4%,transparent)}
+.htl-made q{display:block;margin:4px 0;font-style:italic;color:var(--ui-text-secondary,inherit)}
+.htl-chain{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.htl-chain span{padding:1px 6px;border-radius:6px;background:color-mix(in srgb,currentColor 7%,transparent)}
+.htl-chain span[aria-current="true"]{background:color-mix(in srgb,var(--accent,#7c6cff) 22%,transparent)}
+.htl-open{display:flex;gap:6px;margin:0 0 10px}
+.htl-open input{flex:1;min-width:0;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:6px;background:transparent;color:inherit;font:inherit;padding:4px 8px}
+.htc{display:inline-flex;align-items:center;gap:6px;height:100%;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer;opacity:.85;white-space:nowrap}
+.htc:hover{opacity:1;background:color-mix(in srgb,currentColor 8%,transparent)}
+.htc i{width:7px;height:7px;border-radius:50%;background:var(--accent,#7c6cff)}
+.htc.is-near i{background:#e0a030}
+.htc.is-over i{background:#e05050}
 `
 
 const formatBytes = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
@@ -384,6 +403,33 @@ const FORMATS = [
   ['3MF', '3D printing, one color']
 ]
 
+/** Put text in the focused chat's message box, else on the clipboard. Returns where it went. */
+async function draft(ctx, text) {
+  try {
+    if (await host.composer.insertText(null, text, { mode: 'block' })) return 'composer'
+  } catch {
+    // An older host without the composer API.
+  }
+  return (await ctx.os?.writeClipboard?.(text)) ? 'clipboard' : null
+}
+
+/** "Rigged · 41 joints · 1 clip" or "Not rigged", from the GLB summary the backend sends. */
+function rigBadge(contains) {
+  if (!contains) return null
+  const clips = (contains.clips || []).length
+  if (!contains.joints) return { text: clips ? `Not rigged · ${clips} clip${clips > 1 ? 's' : ''}` : 'Not rigged', rigged: false }
+  return { text: `Rigged · ${contains.joints} joints${clips ? ` · ${clips} clip${clips > 1 ? 's' : ''}` : ''}`, rigged: true }
+}
+
+// Viewer preferences from Settings → Plugins; asked once per card so a change shows on the next one.
+async function preferences(ctx) {
+  try {
+    return await call(ctx, '/settings', { timeoutMs: 10000 })
+  } catch {
+    return {}
+  }
+}
+
 function notify(kind, message, detail) {
   try {
     host.notify({ kind, message, ...(detail ? { detail } : {}) })
@@ -487,17 +533,31 @@ function Progress({ label, value }) {
 
 function TripoModel({ ctx, attrs, streaming }) {
   const taskId = typeof attrs?.task === 'string' ? attrs.task.trim() : ''
-  const valid = TASK_ID.test(taskId)
+  // A local model file (the library's "On this machine"), shown without asking Tripo anything.
+  const localPath = typeof attrs?.path === 'string' ? attrs.path.trim() : ''
+  const valid = TASK_ID.test(taskId) || Boolean(localPath)
   const [state, setState] = useState({ phase: 'checking' })
   const [model, setModel] = useState(null)
   const [stats, setStats] = useState({})
+  const [contains, setContains] = useState(null)
   const [autoRotate, setAutoRotate] = useState(true)
+  const touched = useRef(false)
   const [wireframe, setWireframe] = useState(false)
   const [clip, setClip] = useState(0)
   const [playing, setPlaying] = useState(true)
   const [tall, setTall] = useState(false)
   const [resetToken, setResetToken] = useState(0)
   const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    preferences(ctx).then(prefs => {
+      if (!cancelled && !touched.current && prefs.auto_spin === false) setAutoRotate(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ctx])
 
   useEffect(() => {
     if (!valid || streaming) return
@@ -512,19 +572,23 @@ function TripoModel({ ctx, attrs, streaming }) {
       set({ phase: 'preview', task, image: data_url, note: reason })
     }
 
+    const chunkPath = index =>
+      localPath ? `/local/model?path=${encodeURIComponent(localPath)}&chunk=${index}` : `/model/${taskId}?chunk=${index}`
+
     const load = async task => {
-      if (!task.viewable) {
+      if (!localPath && !task.viewable) {
         const note = task.model_format ? `${task.model_format.toUpperCase()} has no 3D view here` : undefined
         return showPreview(task, note)
       }
       set({ phase: 'loading', task, loaded: 0 })
       const parts = []
-      const first = await call(ctx, `/model/${taskId}?chunk=0`)
+      const first = await call(ctx, chunkPath(0))
       parts.push(decode(first.data))
+      if (!cancelled) setContains(first.contains || null)
       for (let index = 1; index < first.chunks; index++) {
         if (cancelled) return
         set({ phase: 'loading', task, loaded: (index / first.chunks) * 100, size: first.size })
-        parts.push(decode((await call(ctx, `/model/${taskId}?chunk=${index}`)).data))
+        parts.push(decode((await call(ctx, chunkPath(index))).data))
       }
       const bytes = new Uint8Array(first.size)
       let offset = 0
@@ -538,11 +602,20 @@ function TripoModel({ ctx, attrs, streaming }) {
         setModel({ ...parsed, format: first.format, size: first.size })
         set({ phase: 'ready', task })
       } catch (error) {
+        if (localPath) return set({ phase: 'error', task, error: `Could not open the model: ${error.message}` })
         await showPreview(task, `Could not open the model: ${error.message}`)
       }
     }
 
     const poll = async () => {
+      if (localPath) {
+        try {
+          await load({})
+        } catch (error) {
+          set({ phase: 'error', error: error.message })
+        }
+        return
+      }
       try {
         const task = await call(ctx, `/task/${taskId}`)
         if (cancelled) return
@@ -565,7 +638,7 @@ function TripoModel({ ctx, attrs, streaming }) {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [ctx, taskId, valid, streaming, attempt])
+  }, [ctx, taskId, localPath, valid, streaming, attempt])
 
   if (!valid) return null
   if (streaming) return <div className="htv"><Progress label="Tripo model" /></div>
@@ -578,6 +651,7 @@ function TripoModel({ ctx, attrs, streaming }) {
     task.credits_consumed != null && `${task.credits_consumed} credits`,
     attrs.label
   ].filter(Boolean)
+  const badge = rigBadge(contains)
 
   let body
   if (state.phase === 'ready' && model) {
@@ -630,10 +704,15 @@ function TripoModel({ ctx, attrs, streaming }) {
     <div className={`htv${tall ? ' is-tall' : ''}`}>
       {body}
       <div className="htv-foot">
-        <span className="htv-meta htv-muted" title={taskId}>
-          {meta.length ? meta.join(' · ') : taskId}
+        <span className="htv-meta htv-muted" title={localPath || taskId}>
+          {meta.length ? meta.join(' · ') : localPath.split(/[\\/]/).pop() || taskId}
           {state.note ? ` · ${state.note}` : ''}
         </span>
+        {badge && (
+          <span className={`htv-badge${badge.rigged ? '' : ' is-static'}`} title="Read from the file itself">
+            {badge.text}
+          </span>
+        )}
         {state.phase === 'ready' && (
           <>
             {clips.length > 0 && (
@@ -655,7 +734,15 @@ function TripoModel({ ctx, attrs, streaming }) {
                 </button>
               </>
             )}
-            <button type="button" className="htv-btn" aria-pressed={autoRotate} onClick={() => setAutoRotate(v => !v)}>
+            <button
+              type="button"
+              className="htv-btn"
+              aria-pressed={autoRotate}
+              onClick={() => {
+                touched.current = true
+                setAutoRotate(v => !v)
+              }}
+            >
               Spin
             </button>
             <button type="button" className="htv-btn" aria-pressed={wireframe} onClick={() => setWireframe(v => !v)}>
@@ -666,7 +753,7 @@ function TripoModel({ ctx, attrs, streaming }) {
             </button>
           </>
         )}
-        {(state.phase === 'ready' || state.phase === 'preview') && task.model_format && (
+        {!localPath && (state.phase === 'ready' || state.phase === 'preview') && task.model_format && (
           <DownloadMenu ctx={ctx} taskId={taskId} format={model?.format || task.model_format} label={attrs.label} folder={task.downloads_dir} />
         )}
         <button type="button" className="htv-btn" aria-pressed={tall} onClick={() => setTall(v => !v)}>
@@ -718,13 +805,228 @@ function when(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-/** Recent Tripo tasks on this account; pick one to open it in the viewer. */
-function LibraryPane({ ctx }) {
+// What a finished task can become next, drafted into the chat so the agent runs it (and Hermes
+// asks before any credits are spent). `rigged` comes from the file itself when we have it.
+function nextSteps(taskId, kind, rigged) {
+  const steps = []
+  const isModel = !/image|multiview|views|rig_?check|prerigcheck/i.test(kind || '')
+  if (!isModel) {
+    steps.push(['Make a 3D model from it', `Make a 3D model from Tripo task ${taskId}.`])
+    return steps
+  }
+  if (rigged) {
+    steps.push(['Add another animation', `Add another animation to Tripo task ${taskId}: `])
+  } else {
+    steps.push(['Rig and animate it', `Check that Tripo task ${taskId} can be rigged, then rig it and add an animation.`])
+  }
+  steps.push(['Retexture it', `Retexture Tripo task ${taskId}: `])
+  steps.push(['Make a low-poly version', `Make a low-poly version of Tripo task ${taskId} for a game.`])
+  steps.push(['Convert to FBX for Unity or Unreal', `Convert Tripo task ${taskId} to FBX and download it.`])
+  steps.push(['Download it', `Download Tripo task ${taskId} into `])
+  return steps
+}
+
+function ContinueMenu({ ctx, taskId, kind, rigged }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const close = event => {
+      if (event.type === 'keydown' ? event.key === 'Escape' : !box.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', close, true)
+    document.addEventListener('keydown', close, true)
+    return () => {
+      document.removeEventListener('pointerdown', close, true)
+      document.removeEventListener('keydown', close, true)
+    }
+  }, [open])
+  const pick = async text => {
+    setOpen(false)
+    const where = await draft(ctx, text)
+    if (where === 'composer') notify('info', 'In your message box', 'Finish or send it. Hermes asks before spending credits.')
+    else if (where === 'clipboard') notify('info', 'Copied', 'Paste it into a chat.')
+    else notify('error', 'Could not place the request', text)
+  }
+  return (
+    <span ref={box} style={{ position: 'relative' }}>
+      <button type="button" className="htv-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(v => !v)}>
+        Continue from here
+      </button>
+      {open && (
+        <div className="htv-menu" role="menu" style={{ left: 0, right: 'auto', bottom: 'auto', top: 'calc(100% + 6px)' }}>
+          {nextSteps(taskId, kind, rigged).map(([label, text]) => (
+            <button key={label} type="button" role="menuitem" onClick={() => pick(text)}>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+/** Where a task came from: its chat (with a way back to it), the prompt, and the steps behind it. */
+function MadeFrom({ ctx, item }) {
+  const [info, setInfo] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    call(ctx, `/history/${item.task_id}`, { timeoutMs: 10000 })
+      .then(answer => !cancelled && setInfo(answer))
+      .catch(() => !cancelled && setInfo({ known: false }))
+    return () => {
+      cancelled = true
+    }
+  }, [ctx, item.task_id])
+
+  const openChat = async () => {
+    try {
+      await host.openSession(info.session_id)
+    } catch (error) {
+      notify('error', 'Could not open that chat', error?.message || 'It may have been deleted.')
+    }
+  }
+
+  const rigged = info?.chain?.some(step => step.tool === 'tripo_rig' || step.tool === 'tripo_animate') || /^(animate_)?(rig|retarget)$/i.test(item.type || '')
+  // A rig check is a verdict about a model: continue from that model, or not at all.
+  const isCheck = /rig_?check|prerigcheck/i.test(item.type || '') || info?.tool === 'tripo_rig_check'
+  const source = isCheck ? info?.parent : item.task_id
+  return (
+    <>
+      {info?.known && (
+        <div className="htl-made">
+          <div className="htl-chain">
+            {info.chain.map((step, index) => (
+              <span key={step.task_id} aria-current={step.task_id === item.task_id}>
+                {index > 0 ? '→ ' : ''}
+                {step.label}
+              </span>
+            ))}
+          </div>
+          {info.prompt && <q>{info.prompt}</q>}
+          <small className="htv-muted">
+            {info.session_id ? 'Made in a Hermes chat' : 'Made with Hermes'}
+            {info.made_at ? ` · ${when(info.made_at)}` : ''}
+          </small>
+        </div>
+      )}
+      <div className="htl-actions">
+        {info?.session_id && typeof host.openSession === 'function' && (
+          <button type="button" className="htv-btn" onClick={openChat}>
+            Open chat
+          </button>
+        )}
+        {source && <ContinueMenu ctx={ctx} taskId={source} kind={isCheck ? 'text_to_model' : item.type} rigged={!isCheck && rigged} />}
+        {(info?.files || []).slice(-1).map(path => (
+          <button key={path} type="button" className="htv-btn" onClick={() => ctx.os?.revealPath?.(path)}>
+            Show file
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** Model files on this machine, and any model file you point at, in the same viewer. */
+function LocalModels({ ctx }) {
+  const [state, setState] = useState({ loading: true, items: [] })
+  const [selected, setSelected] = useState(null)
+  const [typed, setTyped] = useState('')
+  const [token, setToken] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setState(current => ({ ...current, loading: true, error: null }))
+    call(ctx, '/local', { timeoutMs: 30000 })
+      .then(answer => !cancelled && setState({ loading: false, items: answer.items || [] }))
+      .catch(error => !cancelled && setState({ loading: false, items: [], error: error.message }))
+    return () => {
+      cancelled = true
+    }
+  }, [ctx, token])
+
+  const open = event => {
+    event.preventDefault()
+    const path = typed.trim().replace(/^["']|["']$/g, '')
+    if (path) setSelected(path)
+  }
+
+  const ask = async path => {
+    const where = await draft(ctx, `The 3D model at ${path}: `)
+    if (where === 'clipboard') notify('info', 'Path copied', 'Paste it into the chat.')
+  }
+
+  return (
+    <>
+      <form className="htl-open" onSubmit={open}>
+        <input
+          value={typed}
+          onChange={event => setTyped(event.target.value)}
+          placeholder="Paste the path of a .glb, .fbx, .obj or .stl"
+          aria-label="Model file path"
+        />
+        <button type="submit" className="htv-btn">
+          Open
+        </button>
+      </form>
+      {selected && (
+        <>
+          <TripoModel key={selected} ctx={ctx} attrs={{ path: selected }} streaming={false} />
+          <div className="htl-actions">
+            <button type="button" className="htv-btn" onClick={() => ctx.os?.revealPath?.(selected)}>
+              Show file
+            </button>
+            <button type="button" className="htv-btn" onClick={() => ask(selected)}>
+              Ask about it
+            </button>
+            <button type="button" className="htv-btn" onClick={() => setSelected(null)}>
+              Hide viewer
+            </button>
+          </div>
+        </>
+      )}
+      {state.error ? (
+        <div className="htl-empty">{state.error}</div>
+      ) : !state.loading && !state.items.length ? (
+        <div className="htl-empty">No model files saved yet. Downloads from Tripo tasks show up here.</div>
+      ) : (
+        <div className="htl-list">
+          {state.items.map(item => (
+            <button
+              key={item.path}
+              type="button"
+              className="htl-row"
+              aria-current={item.path === selected}
+              onClick={() => setSelected(item.path)}
+              title={item.path}
+            >
+              {item.task_id ? <Thumb ctx={ctx} taskId={item.task_id} /> : <span className="htl-thumb" aria-hidden="true">◇</span>}
+              <span className="htl-text">
+                <b>{item.name}</b>
+                <small>{[formatBytes(item.bytes), when(item.modified * 1000)].filter(Boolean).join(' · ')}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <button type="button" className="htv-btn" onClick={() => setToken(n => n + 1)} disabled={state.loading}>
+          {state.loading ? 'Looking...' : 'Look again'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+/** Recent Tripo tasks on this account, and model files on this machine; pick one to open it. */
+function LibraryPane({ ctx, initialTab = 'account' }) {
+  const [tab, setTab] = useState(initialTab)
   const [state, setState] = useState({ loading: true, items: [] })
   const [selected, setSelected] = useState(null)
   const [token, setToken] = useState(0)
 
   useEffect(() => {
+    if (tab !== 'account') return
     let cancelled = false
     setState(current => ({ ...current, loading: true, error: null }))
     call(ctx, '/library')
@@ -733,17 +1035,11 @@ function LibraryPane({ ctx }) {
     return () => {
       cancelled = true
     }
-  }, [ctx, token])
+  }, [ctx, token, tab])
 
   const ask = async item => {
-    const text = `Tripo task ${item.task_id} (${item.label}): `
-    let placed = false
-    try {
-      placed = await host.composer.insertText(null, text, { mode: 'block' })
-    } catch {
-      placed = false
-    }
-    if (!placed && (await ctx.os?.writeClipboard?.(text))) notify('info', 'Task reference copied', 'Paste it into the chat.')
+    const where = await draft(ctx, `Tripo task ${item.task_id} (${item.label}): `)
+    if (where === 'clipboard') notify('info', 'Task reference copied', 'Paste it into the chat.')
   }
 
   const current = state.items.find(item => item.task_id === selected)
@@ -751,51 +1047,128 @@ function LibraryPane({ ctx }) {
     <div className="htl">
       <div className="htl-head">
         <span>Tripo library</span>
-        <button type="button" className="htv-btn" onClick={() => setToken(n => n + 1)} disabled={state.loading}>
-          {state.loading ? 'Loading...' : 'Refresh'}
+        {tab === 'account' && (
+          <button type="button" className="htv-btn" onClick={() => setToken(n => n + 1)} disabled={state.loading}>
+            {state.loading ? 'Loading...' : 'Refresh'}
+          </button>
+        )}
+      </div>
+      <div className="htl-tabs" role="tablist">
+        <button type="button" role="tab" className="htv-btn" aria-pressed={tab === 'account'} onClick={() => setTab('account')}>
+          Tripo account
+        </button>
+        <button type="button" role="tab" className="htv-btn" aria-pressed={tab === 'local'} onClick={() => setTab('local')}>
+          On this machine
         </button>
       </div>
       <div className="htl-body">
-        {current && (
-          <>
-            <TripoModel key={current.task_id} ctx={ctx} attrs={{ task: current.task_id, label: current.label }} streaming={false} />
-            <div style={{ display: 'flex', gap: 6, margin: '-4px 0 12px' }}>
-              <button type="button" className="htv-btn" onClick={() => ask(current)}>
-                Ask about it
-              </button>
-              <button type="button" className="htv-btn" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
-          </>
-        )}
-        {state.error ? (
-          <div className="htl-empty">{state.error}</div>
-        ) : !state.loading && !state.items.length ? (
-          <div className="htl-empty">No Tripo tasks on this account yet.</div>
+        {tab === 'local' ? (
+          <LocalModels ctx={ctx} />
         ) : (
-          <div className="htl-list">
-            {state.items.map(item => (
-              <button
-                key={item.task_id}
-                type="button"
-                className="htl-row"
-                aria-current={item.task_id === selected}
-                onClick={() => setSelected(item.task_id)}
-              >
-                <Thumb ctx={ctx} taskId={item.task_id} />
-                <span className="htl-text">
-                  <b>{item.label}</b>
-                  <small>
-                    {[when(item.created_at), item.credits != null && `${item.credits} credits`].filter(Boolean).join(' · ')}
-                  </small>
-                </span>
-              </button>
-            ))}
-          </div>
+          <>
+            {current && (
+              <>
+                <TripoModel key={current.task_id} ctx={ctx} attrs={{ task: current.task_id, label: current.label }} streaming={false} />
+                <MadeFrom key={`made-${current.task_id}`} ctx={ctx} item={current} />
+                <div className="htl-actions">
+                  <button type="button" className="htv-btn" onClick={() => ask(current)}>
+                    Ask about it
+                  </button>
+                  <button type="button" className="htv-btn" onClick={() => setSelected(null)}>
+                    Hide viewer
+                  </button>
+                </div>
+              </>
+            )}
+            {state.error ? (
+              <div className="htl-empty">{state.error}</div>
+            ) : !state.loading && !state.items.length ? (
+              <div className="htl-empty">No Tripo tasks on this account yet.</div>
+            ) : (
+              <div className="htl-list">
+                {state.items.map(item => (
+                  <button
+                    key={item.task_id}
+                    type="button"
+                    className="htl-row"
+                    aria-current={item.task_id === selected}
+                    onClick={() => setSelected(item.task_id)}
+                  >
+                    <Thumb ctx={ctx} taskId={item.task_id} />
+                    <span className="htl-text">
+                      <b>{item.label}</b>
+                      <small>
+                        {[when(item.created_at), item.credits != null && `${item.credits} credits`, item.from_chat && 'from a chat']
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
+  )
+}
+
+const CHIP_REFRESH_MS = 120000
+
+/** Status-bar chip: the Tripo balance, and what the focused chat has spent against its limit. */
+function CreditChip({ ctx, onOpen }) {
+  const [state, setState] = useState(null)
+  useEffect(() => {
+    let alive = true
+    let busy = false
+    const refresh = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const session = host.state?.focusedStoredSessionId?.get?.() || host.state?.activeSessionId?.get?.() || ''
+        const [money, spend] = await Promise.all([
+          call(ctx, '/balance', { timeoutMs: 20000 }),
+          call(ctx, `/spend?session=${encodeURIComponent(session)}`, { timeoutMs: 10000 }).catch(() => ({}))
+        ])
+        if (alive) setState({ ...money, ...spend })
+      } catch {
+        if (alive) setState(null) // no key yet, or offline: show nothing rather than a broken chip
+      } finally {
+        busy = false
+      }
+    }
+    refresh()
+    const stops = [
+      ctx.onEvent?.('tool.complete', event => {
+        if (String(event?.payload?.name || '').startsWith('tripo_')) refresh()
+      }),
+      ctx.setInterval?.(refresh, CHIP_REFRESH_MS),
+      host.state?.focusedStoredSessionId?.listen?.(() => refresh())
+    ]
+    return () => {
+      alive = false
+      for (const stop of stops) if (typeof stop === 'function') stop()
+    }
+  }, [ctx])
+
+  if (!state || state.available == null) return null
+  const spent = state.session_spent || 0
+  const limit = state.session_limit || 0
+  const level = limit && spent > limit ? ' is-over' : limit && spent >= limit * 0.8 ? ' is-near' : ''
+  const title = [
+    `Tripo: ${state.available} credits available${state.frozen ? `, ${state.frozen} held by running tasks` : ''}.`,
+    spent ? `This chat: about ${spent}${limit ? ` of your ${limit}-credit limit` : ''}.` : 'This chat has not spent Tripo credits.',
+    'Click to open the Tripo library.'
+  ].join(' ')
+  return (
+    <button type="button" className={`htc${level}`} title={title} onClick={onOpen}>
+      <i aria-hidden="true" />
+      <span>
+        Tripo {state.available}
+        {spent ? ` · chat ${spent}` : ''}
+      </span>
+    </button>
   )
 }
 
@@ -825,6 +1198,11 @@ export default {
       data: { placement: 'right', width: '380px' },
       render: () => <LibraryPane ctx={ctx} />
     })
+    const openLibrary = (tab = 'account') => {
+      if (typeof host.openWorkspace === 'function') {
+        host.openWorkspace(`hermes-tripo:library:${tab}`, { title: 'Tripo', render: () => <LibraryPane ctx={ctx} initialTab={tab} /> })
+      }
+    }
     ctx.register({
       id: 'open-library',
       area: 'palette',
@@ -832,12 +1210,24 @@ export default {
         id: 'hermes-tripo.library',
         label: 'Open Tripo library',
         keywords: ['tripo', '3d', 'models', 'library'],
-        run: () => {
-          if (typeof host.openWorkspace === 'function') {
-            host.openWorkspace('hermes-tripo:library', { title: 'Tripo', render: () => <LibraryPane ctx={ctx} /> })
-          }
-        }
+        run: () => openLibrary('account')
       }
+    })
+    ctx.register({
+      id: 'inspect-local',
+      area: 'palette',
+      data: {
+        id: 'hermes-tripo.inspect',
+        label: 'Tripo: inspect a local 3D model',
+        keywords: ['tripo', 'glb', 'fbx', 'obj', 'stl', 'model', 'rig', 'inspect', 'view'],
+        run: () => openLibrary('local')
+      }
+    })
+    ctx.register({
+      id: 'credits',
+      area: 'statusBar.right',
+      order: 40,
+      render: () => <CreditChip ctx={ctx} onOpen={() => openLibrary('account')} />
     })
   }
 }

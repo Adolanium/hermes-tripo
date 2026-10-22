@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import glb, plans, viewer
+from . import glb, history, plans, settings, viewer
 from .client import TERMINAL, Client, TripoError, free_stem, local_path, tripo_home
 
 TOOLSET = "tripo"
@@ -371,21 +371,22 @@ def record_spend(session_id: str, credits: int) -> None:
 
 
 def spent(session_id: str) -> int:
-    return _SPENT.get(session_id or "", 0)
+    """This chat's spend: counted in memory, and in the task history so it survives a restart."""
+    return max(_SPENT.get(session_id or "", 0), history.spent(session_id))
 
 
 def session_limit() -> int:
-    """Credits a chat may spend before every paid call asks again. ``TRIPO_SESSION_LIMIT``; 0 turns it off."""
+    """Credits a chat may spend before every paid call asks again: the ``session_limit`` setting,
+    else ``TRIPO_SESSION_LIMIT``, else 100. 0 turns it off."""
     from .client import _secret
 
-    try:
-        raw = _secret("TRIPO_SESSION_LIMIT").strip()
-    except TripoError:
-        raw = ""
-    try:
-        return max(0, int(raw)) if raw else DEFAULT_SESSION_LIMIT
-    except ValueError:
-        return DEFAULT_SESSION_LIMIT
+    raw = settings.get("session_limit", None)
+    if raw is None:
+        try:
+            raw = _secret("TRIPO_SESSION_LIMIT").strip() or None
+        except TripoError:
+            raw = None
+    return max(0, settings.as_int(raw, DEFAULT_SESSION_LIMIT)) if raw is not None else DEFAULT_SESSION_LIMIT
 
 
 def _surface(session_id: str = "") -> str:
@@ -456,6 +457,15 @@ def _create_handler(tool: str) -> Callable[..., str]:
         except TripoError as exc:
             return _err(str(exc), code=exc.code)
         record_spend(session_id, plan.credits)
+        history.record_task(
+            task_id,
+            tool=tool,
+            session_id=session_id,
+            summary=plan.summary,
+            parent=history.parent_of(plan.body),
+            prompt=str((args or {}).get("prompt") or ""),
+            credits=plan.credits,
+        )
         shown = _show_hint(task_id, session_id, finished=False) if tool != "tripo_rig_check" else {}
         return _ok(
             task_id=task_id,
@@ -565,6 +575,8 @@ def tripo_download(args: dict, session_id: str = "", **_: Any) -> str:
                 item = {"file": label, "path": str(target), "bytes": size}
                 if target.suffix.lower() == ".glb" and (contents := glb.summarize(target)):
                     item["contains"] = contents
+                if key == "model_url":
+                    history.record_file(task_id, target)
                 saved.append(item)
     except TripoError as exc:
         return _err(str(exc), code=exc.code)

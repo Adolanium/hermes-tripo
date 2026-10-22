@@ -15,7 +15,7 @@ import httpx
 from .plans import Upload
 
 DEFAULT_BASE = "https://openapi.tripo3d.ai/v3"
-USER_AGENT = "hermes-tripo/0.3.1"
+USER_AGENT = "hermes-tripo/0.4.0"
 TERMINAL = frozenset({"success", "failed", "cancelled", "banned", "expired"})
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
