@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: "Make 3D models with Tripo from text, a photo or several views, then retexture, rig, animate, retopologize, convert and download them. Use when the user wants a 3D model, game asset, rigged or animated character, AR file (USDZ) or a printable mesh, and the tripo plugin is enabled."
-version: 0.3.1
+version: 0.4.0
 author: Adolanium
 license: MIT
 metadata:
@@ -61,8 +61,12 @@ Tool results say how to show a model on the surface you are on; follow them.
   `tripo_download` saves it as `<name>_rendered_video.mp4`; on chat platforms its `attach` line
   posts it, which shows a model better than a still.
 - **The Tripo library:** Desktop users can open past tasks from the Tripo pane (or ⌘K, "Open
-  Tripo library"). Its "Ask about it" button starts a message with `Tripo task <id> (<kind>):`;
-  treat that id as the source for whatever they ask next.
+  Tripo library"). Its "Ask about it" button starts a message with `Tripo task <id> (<kind>):`,
+  and "Continue from here" drafts the next step (rig and animate, another animation, retexture,
+  low-poly, FBX, download) with the task id in it; treat that id as the source for whatever they
+  ask next. Never regenerate a model the user picked from the library. Its "On this machine" tab
+  opens local .glb/.fbx/.obj/.stl files, and a message may start `The 3D model at <path>:`; that
+  path is a local file to work with (upload it only through a tool that takes a path).
 
 ## Cost table (credits, estimates; the task reports the real `credits_consumed`)
 
@@ -206,8 +210,8 @@ needs rig v1.0, so no Mixamo bone naming; I can re-rig from the same model"). On
 ## Spending limit
 
 Every paid call asks first. If the user picks "allow for this session" or "always", later calls
-to that tool stop asking until the chat has spent about 100 credits (`TRIPO_SESSION_LIMIT` in the
-profile's `.env`; `0` turns it off). Past the limit every paid call asks again, and the prompt
+to that tool stop asking until the chat has spent about 100 credits (the `session_limit` setting
+under Settings → Plugins, or `TRIPO_SESSION_LIMIT`; `0` turns it off). Past the limit every paid call asks again, and the prompt
 says what the chat has used. Tell the user when you are close, and plan the remaining steps with
 their costs.
 

@@ -11,7 +11,7 @@
   Hermes Tripo gives Hermes [Tripo](https://www.tripo3d.ai)'s 3D generation: text, a photo or a few views become a textured model,
   which Hermes can then rig, animate, retopologize and convert for your engine, your AR viewer or your printer.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.3.1</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.4.0</sub>
 
   <br /><br />
 
@@ -58,7 +58,8 @@ In **Hermes Desktop** the result lands in the conversation itself. The agent wri
 - **Turn it over.** Drag to orbit, right-drag to pan, Ctrl or ⌘ + scroll to zoom; plain scrolling keeps scrolling the
   chat. Spin, Wireframe, Reset, and Bigger for a taller stage.
 - **Watch it move.** Rigged and animated outputs play in place, with a picker for every clip (walk, run, idle...).
-- **Know what you got.** Format, file size, triangle count and the credits the task used, under the model.
+- **Know what you got.** Format, file size, triangle count and the credits the task used, under the model, and a
+  badge read from the file itself: "Rigged · 41 joints · 1 clip", or "Not rigged".
 - **Take it with you.** **Download** saves the original file to `Downloads\Tripo` for free and shows it in
   your file manager. Other formats (FBX, USDZ, GLTF, OBJ, STL, 3MF) are a click too: the viewer writes the
   request into your message box, and once you send it the agent converts it on Tripo (5 credits) behind the
@@ -69,8 +70,20 @@ In **Hermes Desktop** the result lands in the conversation itself. The agent wri
 Elsewhere the agent uses what the surface has: on **Telegram, Discord, Slack** and other chats it posts the preview
 render and the model file as attachments after a download; in the **CLI and TUI** it gives the saved paths.
 
-The **Tripo library** pane (in the layout menu, or ⌘K → "Open Tripo library") lists your recent Tripo tasks with
-thumbnails. Pick one to open it in the viewer, and "Ask about it" starts a message about that task.
+The **Tripo library** pane (in the layout menu, or ⌘K → "Open Tripo library") has two tabs:
+
+- **Tripo account** lists your recent tasks with thumbnails. Pick one to open it in the viewer and see where it came
+  from: the steps behind it (3D model → Rig → Animation), the prompt, and **Open chat**, which takes you back to the
+  conversation that made it. **Continue from here** writes the next step into your message box (rig and animate it,
+  add another animation, retexture, make a low-poly version, convert to FBX, download), so picking up a model from
+  last week is one click and one send. Hermes still asks before anything spends credits.
+- **On this machine** lists the model files you saved from Tripo tasks and anything in `<HERMES_HOME>/tripo/` or
+  `Downloads\Tripo`, and opens any `.glb`, `.fbx`, `.obj` or `.stl` in your home folder when you paste its path
+  (⌘K → "Tripo: inspect a local 3D model"). The rig badge makes it a quick check for any GLB, from Tripo or not.
+
+A **status-bar chip** shows your Tripo balance and, once the open chat has spent some, what it has used: `Tripo 515 ·
+chat 55`. It turns amber near your per-chat limit and red past it, refreshes after every Tripo tool call, and opens the
+library when clicked. Without a key it stays hidden.
 
 The viewer stays quiet in a long chat: it draws only while on screen, and each task's files are fetched once and cached.
 
@@ -132,8 +145,8 @@ Tripo image to 3D (v3.1-20260211, textured, detailed texture): costs about 50 cr
 ### A limit per chat
 
 "Allow for this session" is handy, so there is a backstop: once a chat has spent about 100 credits, every further paid
-call asks again, and the prompt says how much the chat has used. Set `TRIPO_SESSION_LIMIT` in the profile's `.env` to
-change it, or to `0` to turn it off.
+call asks again, and the prompt says how much the chat has used. Change it in **Settings → Plugins → Hermes Tripo**, or
+set it to `0` to turn it off. The count is kept with the task history, so restarting Hermes does not reset it.
 
 ## Small decisions, already made
 
@@ -186,6 +199,22 @@ Hermes Tripo needs Hermes Agent 0.21.6 or later. Start a new session, then ask:
 - "Open the dancing robot in Blender." (with the Blender plugin enabled too)
 - "How should I export this for Roblox?" (answered from the skill, nothing spent)
 
+### Settings
+
+Hermes Desktop shows these under **Settings → Plugins → Hermes Tripo**. From a terminal:
+
+```sh
+hermes config set plugins.entries.hermes-tripo.settings.session_limit 200
+```
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `session_limit` | `100` | Credits a chat may spend before every paid call asks again. `0` turns it off. |
+| `downloads_folder` | empty | Where the viewer's free Download → Original saves. Empty means `Downloads\Tripo`. |
+| `auto_spin` | `true` | Start each 3D viewer slowly turning. |
+
+`TRIPO_SESSION_LIMIT` in the profile's `.env` still works when `session_limit` is not set.
+
 ### China site
 
 Set `TRIPO_API_BASE=https://openapi.tripo3d.com/v3` to use Tripo's China endpoint.
@@ -235,10 +264,18 @@ Hermes tripo_* tools  →  openapi.tripo3d.ai (Tripo)  →  your models, saved w
   the copies you save from the viewer's Download menu into `Downloads\Tripo` (never overwriting), and
   the viewer's copy of each model and preview it shows, under `<HERMES_HOME>/tripo/<task_id>/.viewer/`. Delete either
   folder at any time.
+- **Task history.** `<HERMES_HOME>/tripo/history.json` keeps, for each task made through these tools (at most 2,000),
+  the chat id, the tool, the prompt (first 400 characters), the task it was made from, its estimated cost and the
+  paths of files saved from it. It powers "Open chat", the per-chat limit and "On this machine", never leaves your
+  machine, and can be deleted at any time.
+- **Local files.** "On this machine" lists model files from the task history, `<HERMES_HOME>/tripo/` and
+  `Downloads\Tripo`. Pasting a path opens it only if it is a `.glb`, `.fbx`, `.obj` or `.stl` inside your home
+  folder (after following links); nothing is uploaded.
 - **The viewer.** The Desktop half talks only to this plugin's own backend (`/api/plugins/hermes-tripo/`), which reads
   task state from Tripo with your key and serves the cached files. It loads no remote code: three.js is bundled in.
-- **Your Tripo history.** When you open the library pane it fetches your recent tasks from Tripo
+- **Your Tripo account.** When you open the library pane it fetches your recent tasks from Tripo
   (`/v3/account/usage`) and, as each row scrolls into view, its preview image. Previews are cached like any viewer file.
+  The status-bar chip reads your balance (`/v3/account/balance`) every two minutes and after each Tripo tool call.
 - **Finding Downloads.** For "Save original", the plugin asks the OS where your Downloads folder is: the Downloads
   known-folder value in the Windows registry (read only), or `XDG_DOWNLOAD_DIR` on Linux, else `~/Downloads`.
 - **Which surface you are on.** A `pre_llm_call` hook notes each session's platform (desktop, telegram, cli...) in
@@ -249,6 +286,7 @@ Hermes tripo_* tools  →  openapi.tripo3d.ai (Tripo)  →  your models, saved w
 
 | Hermes Agent | Python | Status |
 | --- | --- | --- |
+| 0.22.3 | 3.14 | Validated by hand, Desktop viewer included |
 | 0.22.2 | 3.11, 3.13 | Tested in CI and by hand, Desktop viewer included |
 | 0.21.6 (minimum) | 3.11, 3.13 | Tested in CI |
 
@@ -260,7 +298,8 @@ The plugin depends only on `httpx`, which Hermes already ships. It uses Tripo's 
   settings allow it.
 - Local uploads are capped at 50 MB. Pass a public URL for anything larger.
 - Smart UV takes models up to 80,000 triangles; retopologize heavier ones first.
-- The library pane shows your 60 most recent Tripo tasks.
+- The library pane shows your 60 most recent Tripo tasks and 60 local model files. "Open chat" and the prompt are
+  known only for tasks made through these tools from 0.4.0 on.
 - Tripo runs a limited number of tasks at once per account (about 10 standard 3D jobs, 5 P-series). Extra requests
   are refused with a rate-limit error until one finishes.
 - Output links expire, so download soon after a task succeeds. The task itself can be fetched again for fresh links.

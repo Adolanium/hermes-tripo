@@ -68,6 +68,14 @@ class FakeTripo:
         ]
 
 
+@pytest.fixture(autouse=True)
+def hermes_home(tmp_path, monkeypatch):
+    """Every test gets its own HERMES_HOME, so the task history and caches never touch a real one."""
+    home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def tripo(monkeypatch):
     fake = FakeTripo()

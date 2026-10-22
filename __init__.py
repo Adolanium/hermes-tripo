@@ -10,13 +10,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from . import plans
+from . import plans, settings
 from .client import api_key
 from .tools import EMOJI, HANDLERS, SCHEMAS, TOOLSET, remember_platform, session_limit, spent
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 
 def _has_key() -> bool:
@@ -37,7 +37,7 @@ def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = 
 
     The prompt names the request, its estimated cost, any local files it uploads, and what this chat
     has spent so far. ``rule_key`` is per tool, so "allow for this session" covers later calls to the
-    same tool, until the chat's spend would pass ``TRIPO_SESSION_LIMIT`` (default 100 credits): from
+    same tool, until the chat's spend would pass the ``session_limit`` setting (default 100 credits): from
     then on each call gets its own key, so the user is asked again every time. A free call that would
     upload a local file (``tripo_rig_check`` with a path) asks too. Unattended runs (cron,
     ``chat -q``, a gateway nobody answers) cannot approve and the call is refused.
@@ -85,6 +85,7 @@ def note_platform(session_id: str = "", platform: str = "", **_: Any) -> None:
 
 
 def register(ctx: Any) -> None:
+    settings.bind(ctx)
     for name, handler in HANDLERS.items():
         # tripo_balance stays visible without a key so the model can tell the user what is missing.
         keyless = name == "tripo_balance"
