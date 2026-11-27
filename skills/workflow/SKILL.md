@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: "Make 3D models with Tripo from text, a photo or several views, then retexture, rig, animate, retopologize, convert and download them. Use when the user wants a 3D model, game asset, rigged or animated character, AR file (USDZ) or a printable mesh, and the tripo plugin is enabled."
-version: 0.4.0
+version: 0.4.1
 author: Adolanium
 license: MIT
 metadata:
