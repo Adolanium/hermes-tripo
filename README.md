@@ -148,6 +148,40 @@ Tripo image to 3D (v3.1-20260211, textured, detailed texture): costs about 50 cr
 call asks again, and the prompt says how much the chat has used. Change it in **Settings → Plugins → Hermes Tripo**, or
 set it to `0` to turn it off. The count is kept with the task history, so restarting Hermes does not reset it.
 
+### Tripo's own MCP server
+
+Tripo also runs an MCP server, [Tripo Studio MCP](https://studio.tripo3d.ai/mcp), which spends the credits of your
+Tripo Studio plan instead of API credits. If you connect it to Hermes, this plugin puts its tools behind the same
+approval prompt:
+
+```text
+Tripo Studio text to model: spends credits from your Tripo Studio plan (Tripo's MCP server does not say how many)
+```
+
+- Every Studio tool that submits work asks. Reads (tasks, assets, exports, motion presets), upload grants, copies
+  and cancels run without a prompt. A tool Tripo adds later asks until this list knows it.
+- Tripo's server gives no price, so the prompt has no estimate, and the per-chat limit and the status-bar chip do
+  not count Studio credits. "Allow for this session" on a Studio tool covers it until the session ends.
+- The plugin does not connect to that server or handle its sign-in; Hermes does. The 3D viewer, the library and
+  `tripo_task` show API tasks only: Studio tasks are a separate set.
+
+Tripo signs clients in by a fixed client id and has none for Hermes yet. This entry in `config.yaml` uses the one
+Tripo publishes for Claude Code, and worked on Hermes 0.23.4; Tripo may change or withdraw it:
+
+```yaml
+mcp_servers:
+  tripo:
+    url: https://msapi.tripo3d.ai/mcp
+    auth: oauth
+    oauth:
+      client_id: studio-claude-code
+      redirect_port: 3000
+      redirect_host: localhost
+```
+
+Then run `hermes mcp login tripo` and approve the sign-in in your browser. Studio MCP is for personal Tripo Studio
+accounts.
+
 ## Small decisions, already made
 
 - A create is sent once and never retried. If the network drops mid-request, the agent is told the task may exist and

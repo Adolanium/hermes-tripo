@@ -40,6 +40,28 @@ def test_gate_leaves_invalid_calls_to_the_handler(tripo):
     assert tripo.requests == []
 
 
+def test_gate_asks_for_tripo_studio_mcp_calls_that_spend():
+    directive = plugin.spend_gate(tool_name="mcp__tripo__tripo_text_to_model", args={"prompt": "a chair"})
+    assert directive["action"] == "approve"
+    assert directive["message"].startswith("Tripo Studio text to model: spends credits")
+    assert directive["rule_key"] == "tripo:studio:tripo_text_to_model"
+    # Whatever the user named the server, and for a tool Tripo adds after this release.
+    for name in ("mcp__my_tripo__studio__tripo_rig_model", "mcp__tripo__tripo_some_new_tool"):
+        assert plugin.spend_gate(tool_name=name, args={})["action"] == "approve"
+
+
+def test_gate_lets_free_tripo_studio_mcp_calls_and_other_servers_through():
+    for name in (
+        "mcp__tripo__tripo_get_model_task",
+        "mcp__tripo__tripo_list_model_assets",
+        "mcp__tripo__tripo_copy_model",
+        "mcp__tripo__tripo_create_image_upload_grant",
+        "mcp__figma__get_design_context",
+        "mcp__tripo__search",
+    ):
+        assert plugin.spend_gate(tool_name=name, args={}) is None
+
+
 # -- creates --------------------------------------------------------------------------------------
 
 
