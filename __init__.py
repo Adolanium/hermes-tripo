@@ -31,6 +31,56 @@ def _file_names(files: list[plans.Upload]) -> str:
     return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
 
 
+# Tripo's own MCP server (Tripo Studio MCP, https://msapi.tripo3d.ai/mcp) spends the user's Studio
+# credits. These are its tools that only read, or that Tripo documents as free; every other tool it
+# has, or adds later, is treated as spending.
+STUDIO_FREE = frozenset(
+    {
+        "tripo_cancel_model_task",
+        "tripo_copy_model",
+        "tripo_create_image_upload_grant",
+        "tripo_create_model_upload_grant",
+        "tripo_get_image_asset",
+        "tripo_get_image_task",
+        "tripo_get_image_task_by_idempotency_key",
+        "tripo_get_model_asset",
+        "tripo_get_model_export",
+        "tripo_get_model_task",
+        "tripo_get_model_task_by_idempotency_key",
+        "tripo_get_model_task_progress",
+        "tripo_get_motion_asset",
+        "tripo_list_active_model_tasks",
+        "tripo_list_image_assets",
+        "tripo_list_model_assets",
+        "tripo_list_model_exports",
+        "tripo_list_model_tasks",
+        "tripo_list_motion_assets",
+        "tripo_list_motion_presets",
+    }
+)
+
+
+def studio_tool(tool_name: str) -> str | None:
+    """The Tripo Studio MCP tool behind a Hermes MCP tool name (``mcp__<server>__tripo_...``), else
+    None. The server part is whatever the user called the server, so only the tool part is matched."""
+    if not tool_name.startswith("mcp__"):
+        return None
+    tool = tool_name.rpartition("__")[2]
+    return tool if tool.startswith("tripo_") else None
+
+
+def _studio_gate(tool: str) -> dict | None:
+    if tool in STUDIO_FREE:
+        return None
+    label = tool.removeprefix("tripo_").replace("_", " ")
+    return {
+        "action": "approve",
+        "message": f"Tripo Studio {label}: spends credits from your Tripo Studio plan "
+        "(Tripo's MCP server does not say how many)",
+        "rule_key": f"tripo:studio:{tool}",
+    }
+
+
 def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = "", **_: Any) -> dict | None:
     """``pre_tool_call``: send every credit-spending Tripo call, and every local-file upload, to
     Hermes' approval prompt.
@@ -41,7 +91,14 @@ def spend_gate(tool_name: str = "", args: dict | None = None, session_id: str = 
     then on each call gets its own key, so the user is asked again every time. A free call that would
     upload a local file (``tripo_rig_check`` with a path) asks too. Unattended runs (cron,
     ``chat -q``, a gateway nobody answers) cannot approve and the call is refused.
+
+    Calls to Tripo's own MCP server, when the user has connected it, ask too. They spend Studio
+    credits, and that server gives no price, so the prompt has no estimate and the per-chat limit
+    does not count them.
     """
+    studio = studio_tool(tool_name)
+    if studio:
+        return _studio_gate(studio)
     if tool_name not in plans.BUILDERS:
         return None
     try:
